@@ -34,12 +34,25 @@
 
     <div class="card">
         <h3>Registo de Atividade</h3>
-        <div id="tradeLog" class="trade-log">A iniciar ligação...</div>
+        <div id="tradeLog" class="trade-log">A sincronizar relógio e ligação...</div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script>
         let ordemExecutada = false;
+        let timeOffset = 0;
+
+        async function sincronizarRelogio() {
+            try {
+                const res = await fetch('https://api.bybit.com/v5/market/time');
+                const data = await res.json();
+                if (data.timeNano) {
+                    const serverTime = parseInt(data.timeNano) / 1000000;
+                    timeOffset = serverTime - Date.now();
+                }
+            } catch (e) {
+                timeOffset = 0;
+            }
+        }
 
         async function asyncCryptoHMAC(secret, message) {
             const enc = new TextEncoder();
@@ -60,6 +73,7 @@
 
                 if (!ordemExecutada) {
                     ordemExecutada = true;
+                    await sincronizarRelogio();
                     executarOrdemNavegador();
                 }
             } catch (e) {
@@ -81,10 +95,10 @@
                     return;
                 }
 
-                logBox.innerText = `[${time}] 🚀 A enviar ordem de 6 XRP diretamente para a Bybit...\n` + logBox.innerText;
+                logBox.innerText = `[${time}] 🚀 A enviar ordem de 6 XRP com timestamp sincronizado...\n` + logBox.innerText;
 
-                const timestamp = Date.now().toString();
-                const recvWindow = '5000';
+                const timestamp = (Date.now() + timeOffset).toString();
+                const recvWindow = '10000'; // Janela alargada para evitar rejeições
                 const bodyData = {
                     category: "spot",
                     symbol: "XRPUSDT",
@@ -96,7 +110,6 @@
                 const jsonBody = JSON.stringify(bodyData);
                 const signature = await asyncCryptoHMAC(keys.secretKey, timestamp + keys.apiKey + recvWindow + jsonBody);
 
-                // Executa direto pelo navegador do utilizador (sem bloqueio da Amazon AWS)
                 const response = await fetch('https://api.bybit.com/v5/order/create', {
                     method: 'POST',
                     headers: {
@@ -123,7 +136,7 @@
 
         window.addEventListener('DOMContentLoaded', () => {
             atualizarPainel();
-            setInterval(atualizarPainel, 5000);
+            setInterval(atualizarPainel, 6000);
         });
     </script>
 
