@@ -22,15 +22,13 @@ function generateSignature(timestamp, recvWindow, queryString) {
         .digest('hex');
 }
 
-// Serve o painel HTML na rota principal
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Endpoint do saldo real na Bybit
 app.get('/binance-account', async (req, res) => {
     try {
-        if (!API_KEY || !SECRET_KEY) throw new Error("Chaves ausentes");
+        if (!API_KEY || !SECRET_KEY) throw new Error("Missing keys");
 
         const timestamp = Date.now().toString();
         const recvWindow = '5000';
@@ -55,32 +53,19 @@ app.get('/binance-account', async (req, res) => {
             canTrade: true,
             accountType: "BYBIT UNIFIED REAL",
             balances: [{ asset: "USDT", free: freeUsdt, locked: "0.00" }],
-            gridStats: {
-                totalProfit: "0.00",
-                tradesExecuted: 0,
-                tradesHistory: [],
-                roiDaily: "+0.00%",
-                status: "CONECTADO À BYBIT EM TEMPO REAL"
-            }
+            gridStats: { totalProfit: "0.00", tradesExecuted: 0, tradesHistory: [], roiDaily: "+0.00%", status: "CONNECTED LIVE" }
         });
     } catch (error) {
         res.json({
             success: true,
             canTrade: true,
-            accountType: "BYBIT UNIFIED MODO SEGURO",
+            accountType: "BYBIT UNIFIED SAFE",
             balances: [{ asset: "USDT", free: "8.99", locked: "0.00" }],
-            gridStats: {
-                totalProfit: "0.00",
-                tradesExecuted: 0,
-                tradesHistory: [],
-                roiDaily: "+0.00%",
-                status: "CONECTADO À BYBIT"
-            }
+            gridStats: { totalProfit: "0.00", tradesExecuted: 0, tradesHistory: [], roiDaily: "+0.00%", status: "CONNECTED" }
         });
     }
 });
 
-// Endpoint para buscar o preço real da Bybit conforme o par selecionado (BTCUSDT, ETHUSDT, SOLUSDT)
 app.get('/grid-status', async (req, res) => {
     let symbol = req.query.symbol || 'BTCUSDT';
     symbol = symbol.toUpperCase().trim();
@@ -100,7 +85,7 @@ app.get('/grid-status', async (req, res) => {
             }
         }
     } catch (err) {
-        console.error("Erro ao consultar ticker da Bybit:", err.message);
+        console.error("Error fetching ticker:", err.message);
     }
 
     if (currentPrice === 0) {
@@ -109,29 +94,12 @@ app.get('/grid-status', async (req, res) => {
         else currentPrice = 81138.30;
     }
 
-    const lower = currentPrice * 0.9;
-    const upper = currentPrice * 1.1;
-    const step = (upper - lower) / 4;
-    let levels = [];
-
-    for (let i = 0; i < 5; i++) {
-        const levelPrice = lower + (i * step);
-        levels.push({
-            level: i + 1,
-            price: levelPrice.toFixed(2),
-            type: levelPrice > currentPrice ? 'VENDA' : 'COMPRA',
-            status: 'AGUARDANDO MERCADO'
-        });
-    }
-
     res.json({
         success: true,
         symbol: symbol,
         currentPrice: currentPrice.toFixed(2),
-        gridLevels: levels,
-        totalProfit: "0.00",
-        tradesHistory: []
+        totalProfit: "0.00"
     });
 });
 
-app.listen(PORT, () => console.log(`Servidor a rodar na porta ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
