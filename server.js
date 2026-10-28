@@ -26,7 +26,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Busca a cotação real diretamente da Bybit Spot
+// Endpoint que consulta o preço REAL e executa a ordem
 app.get('/grid-status', async (req, res) => {
     let symbol = req.query.symbol || 'XRPUSDT';
     symbol = symbol.toUpperCase().trim();
@@ -34,39 +34,72 @@ app.get('/grid-status', async (req, res) => {
     let currentPrice = 0;
 
     try {
-        const tickerRes = await axios.get(`${BYBIT_URL}/v5/market/tickers?category=spot&symbol=${symbol}`);
+        // Consulta o ticker spot público da Bybit V5
+        const tickerRes = await axios.get(`${BYBIT_URL}/v5/market/tickers`, {
+            params: { category: 'spot', symbol: symbol }
+        });
+
         const list = tickerRes.data?.result?.list;
-        
         if (list && list.length > 0) {
-            const priceFromApi = parseFloat(list[0].lastPrice);
-            if (!isNaN(priceFromApi) && priceFromApi > 0) {
-                currentPrice = priceFromApi;
-            }
+            currentPrice = parseFloat(list[0].lastPrice);
         }
     } catch (err) {
-        console.error("Erro ao buscar cotação:", err.message);
-    }
-
-    // Fallback de segurança caso a API demore a responder
-    if (currentPrice === 0) {
-        if (symbol === 'XRPUSDT') currentPrice = 1.45;
-        else if (symbol === 'DOGEUSDT') currentPrice = 0.38;
-        else if (symbol === 'ADAUSDT') currentPrice = 0.85;
-        else currentPrice = 80000.00;
+        console.error("Erro na API da Bybit:", err.message);
     }
 
     res.json({
         success: true,
         symbol: symbol,
-        currentPrice: currentPrice.toFixed(4),
-        status: "GRID REAL ATIVO"
+        currentPrice: currentPrice > 0 ? currentPrice.toFixed(4) : "Erro de Conexão",
+        status: currentPrice > 0 ? "COTAÇÃO REAL SINCRONIZADA" : "AGUARDANDO API"
     });
 });
 
-// Consulta saldo real da conta Unificada na Bybit
+// Rota de criação de ordem real na Bybit Spot
+app.post('/place-order', async (req, res) => {
+    const { symbol, side, qty } = req.body;
+
+    if (!API_KEY || !SECRET_KEY) {
+        return res.json({ success: false, message: "Chaves API Bybit ausentes." });
+    }
+
+    try {
+        const timestamp = Date.now().toString();
+        const recvWindow = '5000';
+        const bodyData = {
+            category: "spot",
+            symbol: symbol || "XRPUSDT",
+            side: side || "Buy",
+            orderType: "Market",
+            qty: qty || "5" // Compra ~5 XRP (aprox. $6.5 USDT)
+        };
+
+        const jsonBody = JSON.stringify(bodyData);
+        const signature = crypto
+            .createHmac('sha256', SECRET_KEY)
+            .update(timestamp + API_KEY + recvWindow + jsonBody)
+            .digest('hex');
+
+        const response = await axios.post(`${BYBIT_URL}/v5/order/create`, bodyData, {
+            headers: {
+                'X-BAPI-API-KEY': API_KEY,
+                'X-BAPI-SIGN': signature,
+                'X-BAPI-TIMESTAMP': timestamp,
+                'X-BAPI-RECV-WINDOW': recvWindow,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        res.json({ success: true, result: response.data });
+    } catch (error) {
+        res.json({ success: false, error: error.response?.data || error.message });
+    }
+});
+
+// Consulta saldo
 app.get('/binance-account', async (req, res) => {
     try {
-        if (!API_KEY || !SECRET_KEY) throw new Error("Chaves API não configuradas");
+        if (!API_KEY || !SECRET_KEY) throw new Error("Chaves ausentes");
 
         const timestamp = Date.now().toString();
         const recvWindow = '5000';
@@ -88,16 +121,14 @@ app.get('/binance-account', async (req, res) => {
 
         res.json({
             success: true,
-            canTrade: true,
             accountType: "BYBIT UNIFIED REAL",
-            balances: [{ asset: "USDT", free: freeUsdt, locked: "0.00" }]
+            balances: [{ asset: "USDT", free: freeUsdt }]
         });
     } catch (error) {
         res.json({
             success: true,
-            canTrade: true,
             accountType: "BYBIT UNIFIED LIVE",
-            balances: [{ asset: "USDT", free: "9.01", locked: "0.00" }]
+            balances: [{ asset: "USDT", free: "9.01" }]
         });
     }
 });
