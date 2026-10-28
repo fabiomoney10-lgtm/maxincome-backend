@@ -34,7 +34,7 @@
 
     <div class="card">
         <h3>Registo de Atividade</h3>
-        <div id="tradeLog" class="trade-log">A sincronizar com a Bybit...</div>
+        <div id="tradeLog" class="trade-log">A sincronizar relógio global...</div>
     </div>
 
     <script>
@@ -80,14 +80,15 @@
                     return;
                 }
 
-                // Obtém o timestamp diretamente do servidor da Bybit no exato momento da ordem para evitar qualquer desfasamento
-                const timeRes = await fetch('https://api.bybit.com/v5/market/time');
+                // Obtém o timestamp exato e sincronizado através da API pública da Binance
+                logBox.innerText = `[${time}] 🕒 A sincronizar relógio via servidor global...\n` + logBox.innerText;
+                const timeRes = await fetch('https://api.binance.com/api/v3/time');
                 const timeData = await timeRes.json();
-                const serverTimestamp = timeData.timeNano ? Math.floor(parseInt(timeData.timeNano) / 1000000).toString() : Date.now().toString();
+                const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
 
                 logBox.innerText = `[${time}] 🚀 A enviar ordem de 6 XRP para a Bybit...\n` + logBox.innerText;
 
-                const recvWindow = '60000'; // Janela alargada para 60 segundos
+                const recvWindow = '60000'; // Janela de segurança de 60 segundos
                 const bodyData = {
                     category: "spot",
                     symbol: "XRPUSDT",
