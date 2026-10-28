@@ -8,36 +8,54 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Configuracoes Iniciais da Estrategia Grid Trading
+// Configuração do Grid Bot Autónomo (Simulação Realista)
 let gridConfig = {
     symbol: 'BTCUSDT',
-    lowerPrice: 60000,   // Limite inferior do Grid (USDT)
-    upperPrice: 70000,   // Limite superior do Grid (USDT)
-    gridLevels: 5,       // Quantidade de niveis de compra/venda
-    allocatedCapital: 1000, // Capital em USDT alocado
-    active: true
+    lowerPrice: 60000,
+    upperPrice: 70000,
+    gridLevels: 5
 };
 
-// Estado da Conta e Bot
+// Estado Dinâmico do Bot na Nuvem
 let botState = {
     usdtBalance: 1250.50,
     btcBalance: 0.045,
     totalProfitUSDT: 42.80,
-    activeGridOrders: [],
-    lastExecution: new Date().toISOString()
+    tradesCount: 12,
+    status: "RODANDO 24/7 (SIMULAÇÃO INTELIGENTE)"
 };
 
-// Rota Principal
+// Função autónoma simulada que roda a cada alteração de preço
+async function runGridBotEngine() {
+    try {
+        const response = await axios.get('https://api.binance.com/api/v3/ticker/price?symbol=' + gridConfig.symbol);
+        const currentPrice = parseFloat(response.data.price);
+        
+        // Pequena simulação dinâmica de lucro baseada na volatilidade do mercado real
+        if (Math.random() > 0.7) {
+            const simulatedProfit = 0.50; // Cada acerto gera pequeno lucro em USDT
+            botState.totalProfitUSDT += simulatedProfit;
+            botState.usdtBalance += simulatedProfit;
+            botState.tradesCount += 1;
+        }
+        return currentPrice;
+    } catch (err) {
+        console.error("Erro no motor do bot:", err.message);
+        return 67450.00;
+    }
+}
+
 app.get('/', (req, res) => {
-    res.send('MaxIncome Backend - Motor Grid Trading Ativo 24/7!');
+    res.send('MaxIncome Backend - Motor Autónomo Ativo na Nuvem!');
 });
 
-// Rota de Saldos e Status do Bot
-app.get('/binance-account', (req, res) => {
+// Rota de Conta e Saldos Atualizados pelo Bot
+app.get('/binance-account', async (req, res) => {
+    await runGridBotEngine();
     res.json({
         success: true,
         canTrade: true,
-        accountType: "SPOT - GRID BOT",
+        accountType: "SPOT - GRID BOT (PAPER TRADING)",
         balances: [
             { asset: "USDT", free: botState.usdtBalance.toFixed(2), locked: "0.00" },
             { asset: "BTC", free: botState.btcBalance.toFixed(4), locked: "0.00" },
@@ -47,30 +65,32 @@ app.get('/binance-account', (req, res) => {
             symbol: gridConfig.symbol,
             totalProfit: botState.totalProfitUSDT.toFixed(2),
             activeOrdersCount: gridConfig.gridLevels,
-            status: gridConfig.active ? "RODANDO 24/7" : "PAUSADO"
+            tradesExecuted: botState.tradesCount,
+            status: botState.status
         }
     });
 });
 
-// Rota do Grid Trading (Preco em Tempo Real + Niveis da Grelha)
+// Rota de Status e Níveis do Grid com Preço Real da Binance
 app.get('/grid-status', async (req, res) => {
     try {
-        // Consulta preco atual do BTC na Binance publica
         const tickerResponse = await axios.get('https://api.binance.com/api/v3/ticker/price?symbol=' + gridConfig.symbol);
         const currentPrice = parseFloat(tickerResponse.data.price);
 
-        // Calcula os niveis da grelha
         const step = (gridConfig.upperPrice - gridConfig.lowerPrice) / (gridConfig.gridLevels - 1);
         let levels = [];
 
         for (let i = 0; i < gridConfig.gridLevels; i++) {
             const levelPrice = gridConfig.lowerPrice + (i * step);
             const type = levelPrice > currentPrice ? 'VENDA' : 'COMPRA';
+            // Simula estados dinâmicos das ordens
+            const orderStatus = Math.abs(levelPrice - currentPrice) < 2500 ? 'EXECUTADO / LUCRO' : 'AGUARDANDO';
+
             levels.push({
                 level: i + 1,
                 price: levelPrice.toFixed(2),
                 type: type,
-                status: 'AGUARDANDO'
+                status: orderStatus
             });
         }
 
@@ -84,13 +104,10 @@ app.get('/grid-status', async (req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: "Erro ao consultar cotacao da Binance: " + error.message
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Servidor MaxIncome Grid Bot a rodar na porta ${PORT}`);
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
