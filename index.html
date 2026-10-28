@@ -7,7 +7,7 @@
         body { background-color: #131722; color: #d1d4dc; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
         h1 { color: #f0b90b; }
         .card { background: #1e222d; padding: 20px; margin: 15px auto; width: 60%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        select { padding: 10px; font-size: 16px; border-radius: 5px; border: none; background: #f0b90b; color: #000; font-weight: bold; cursor: pointer; }
+        select { padding: 10px; font-size: 16px; border-radius: 5px; border: none; background: #f0b90b; color: #000; font-weight: bold; }
         .status-box { color: #0ecb81; font-weight: bold; margin-bottom: 20px; font-size: 16px; }
         .trade-log { background: #11141d; padding: 15px; border-radius: 5px; margin-top: 10px; font-family: monospace; color: #0ecb81; text-align: left; max-height: 180px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
     </style>
@@ -18,15 +18,10 @@
     <p>Sistema de Grid Trading 100% Autónomo em Tempo Real</p>
 
     <div class="card">
-        <label for="symbolSelect"><strong>Ativo em Operação Autónoma:</strong> </label>
-        <select id="symbolSelect">
-            <option value="XRPUSDT" selected>XRP (XRP/USDT)</option>
-            <option value="DOGEUSDT">DOGE (DOGE/USDT)</option>
-            <option value="ADAUSDT">ADA (ADA/USDT)</option>
-        </select>
+        <label><strong>Ativo em Operação:</strong> XRP (XRP/USDT)</label>
     </div>
 
-    <div class="status-box">🟢 Robô a operar sozinho na nuvem (24 horas por dia)</div>
+    <div class="status-box">🟢 Sistema Conectado e Operacional</div>
 
     <div class="card">
         <h3>Saldo Disponível na Bybit</h3>
@@ -34,49 +29,58 @@
     </div>
 
     <div class="card">
-        <h3>Cotação de Mercado em Tempo Real (<span id="currentSymbol">XRPUSDT</span>)</h3>
+        <h3>Cotação de Mercado em Tempo Real (XRPUSDT)</h3>
         <h2 id="currentPrice" style="color: #f0b90b;">$ --</h2>
     </div>
 
     <div class="card">
-        <h3>Registo de Atividade Autónoma do Robô</h3>
-        <div id="tradeLog" class="trade-log">A ligar ao motor autónomo...</div>
+        <h3>Registo de Atividade Autónoma</h3>
+        <div id="tradeLog" class="trade-log">A iniciar conexão com o mercado...</div>
     </div>
 
     <script>
-        async function atualizarPainel() {
-            const symbol = document.getElementById('symbolSelect').value;
-            document.getElementById('currentSymbol').innerText = symbol;
+        let ordemDisparada = false;
 
+        async function atualizarPainel() {
             try {
-                // Preço em tempo real via Binance Public API (sem bloqueio de rede)
-                const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+                const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT`);
                 const data = await res.json();
                 if (data && data.price) {
                     document.getElementById('currentPrice').innerText = `$ ${parseFloat(data.price).toFixed(4)}`;
                 }
 
-                // Saldo na Bybit
-                const accRes = await fetch('/binance-account');
-                const accData = await accRes.json();
-                if (accData && accData.balances && accData.balances[0]) {
-                    document.getElementById('saldoUsdt').innerText = `$ ${accData.balances[0].free} USDT`;
-                }
-
-                // Registos autónomos gerados pelo servidor na nuvem
-                const logRes = await fetch('/logs');
-                const logData = await logRes.json();
-                if (logData && logData.logs) {
-                    document.getElementById('tradeLog').innerText = logData.logs.join('\n');
+                if (!ordemDisparada) {
+                    ordemDisparada = true;
+                    executarOrdemAutomatica();
                 }
             } catch (e) {
-                console.error("Erro na atualização automática:", e);
+                console.error(e);
+            }
+        }
+
+        async function executarOrdemAutomatica() {
+            const logBox = document.getElementById('tradeLog');
+            const time = new Date().toLocaleTimeString();
+            logBox.innerText = `[${time}] 🚀 A disparar ordem automática de 6 XRP para a Bybit...\n` + logBox.innerText;
+
+            try {
+                const res = await fetch('/place-order-proxy', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success && data.result?.retCode === 0) {
+                    logBox.innerText = `[${time}] ✅ ORDEM EXECUTADA COM SUCESSO! ID: ${data.result.result.orderId}\n` + logBox.innerText;
+                } else {
+                    const msg = data.error?.retMsg || JSON.stringify(data.error) || "Erro desconhecido";
+                    logBox.innerText = `[${time}] ⚠️ Resposta da Bybit: ${msg}\n` + logBox.innerText;
+                }
+            } catch (err) {
+                logBox.innerText = `[${time}] ❌ Erro: ${err.message}\n` + logBox.innerText;
             }
         }
 
         window.addEventListener('DOMContentLoaded', () => {
             atualizarPainel();
-            setInterval(atualizarPainel, 3000); // Atualiza a tela a cada 3 segundos
+            setInterval(atualizarPainel, 4000);
         });
     </script>
 
