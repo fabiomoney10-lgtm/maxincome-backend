@@ -2,34 +2,31 @@
 <html lang="pt">
 <head>
     <meta charset="UTF-8">
-    <title>MaxIncome - Nuvem Real 24/7</title>
+    <title>MaxIncome - Nuvem Autónoma 24/7</title>
     <style>
         body { background-color: #131722; color: #d1d4dc; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
         h1 { color: #f0b90b; }
         .card { background: #1e222d; padding: 20px; margin: 15px auto; width: 60%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        select, button { padding: 10px; font-size: 16px; border-radius: 5px; border: none; background: #f0b90b; color: #000; font-weight: bold; cursor: pointer; margin: 5px; }
-        .btn-order { background: #0ecb81; color: #fff; }
-        .status-box { color: #0ecb81; font-weight: bold; margin-bottom: 20px; }
-        .trade-log { background: #11141d; padding: 15px; border-radius: 5px; margin-top: 10px; font-family: monospace; color: #0ecb81; text-align: left; max-height: 150px; overflow-y: auto; font-size: 13px; }
+        select { padding: 10px; font-size: 16px; border-radius: 5px; border: none; background: #f0b90b; color: #000; font-weight: bold; cursor: pointer; }
+        .status-box { color: #0ecb81; font-weight: bold; margin-bottom: 20px; font-size: 16px; }
+        .trade-log { background: #11141d; padding: 15px; border-radius: 5px; margin-top: 10px; font-family: monospace; color: #0ecb81; text-align: left; max-height: 180px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
     </style>
 </head>
 <body>
 
-    <h1>MaxIncome - Nuvem Real 24/7</h1>
-    <p>Plataforma Autónoma de Trading em Tempo Real</p>
+    <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
+    <p>Sistema de Grid Trading 100% Autónomo em Tempo Real</p>
 
     <div class="card">
-        <label for="symbolSelect"><strong>Selecione o Par:</strong> </label>
-        <select id="symbolSelect" onchange="atualizarDados()">
+        <label for="symbolSelect"><strong>Ativo em Operação Autónoma:</strong> </label>
+        <select id="symbolSelect">
             <option value="XRPUSDT" selected>XRP (XRP/USDT)</option>
             <option value="DOGEUSDT">DOGE (DOGE/USDT)</option>
             <option value="ADAUSDT">ADA (ADA/USDT)</option>
         </select>
-        <button onclick="atualizarDados()">Atualizar Cotação</button>
-        <button class="btn-order" onclick="executarOrdemReal()">Enviar Ordem Real p/ Bybit</button>
     </div>
 
-    <div class="status-box" id="statusBox">🟢 Sistema Online e Ativo</div>
+    <div class="status-box">🟢 Robô a operar sozinho na nuvem (24 horas por dia)</div>
 
     <div class="card">
         <h3>Saldo Disponível na Bybit</h3>
@@ -37,75 +34,49 @@
     </div>
 
     <div class="card">
-        <h3>Cotação Exata em Tempo Real (<span id="currentSymbol">XRPUSDT</span>)</h3>
+        <h3>Cotação de Mercado em Tempo Real (<span id="currentSymbol">XRPUSDT</span>)</h3>
         <h2 id="currentPrice" style="color: #f0b90b;">$ --</h2>
     </div>
 
     <div class="card">
-        <h3>Registo de Execução em Tempo Real</h3>
-        <div id="tradeLog" class="trade-log">Monitorização ativa e pronta para operar...</div>
+        <h3>Registo de Atividade Autónoma do Robô</h3>
+        <div id="tradeLog" class="trade-log">A ligar ao motor autónomo...</div>
     </div>
 
     <script>
-        async function atualizarDados() {
+        async function atualizarPainel() {
             const symbol = document.getElementById('symbolSelect').value;
             document.getElementById('currentSymbol').innerText = symbol;
 
             try {
-                // Busca a cotação diretamente via API pública global (sem bloqueio de servidor)
+                // Preço em tempo real via Binance Public API (sem bloqueio de rede)
                 const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
                 const data = await res.json();
-                
                 if (data && data.price) {
-                    const price = parseFloat(data.price).toFixed(4);
-                    document.getElementById('currentPrice').innerText = `$ ${price}`;
-                    document.getElementById('statusBox').innerText = `🟢 Sincronizado com o Mercado`;
+                    document.getElementById('currentPrice').innerText = `$ ${parseFloat(data.price).toFixed(4)}`;
                 }
 
-                // Atualiza Saldo do Servidor
+                // Saldo na Bybit
                 const accRes = await fetch('/binance-account');
                 const accData = await accRes.json();
-                
                 if (accData && accData.balances && accData.balances[0]) {
                     document.getElementById('saldoUsdt').innerText = `$ ${accData.balances[0].free} USDT`;
                 }
-            } catch (e) {
-                console.error("Erro ao atualizar cotação:", e);
-                document.getElementById('currentPrice').innerText = `$ 1.3160`; // Contingência visual imediata
-            }
-        }
 
-        async function executarOrdemReal() {
-            const symbol = document.getElementById('symbolSelect').value;
-            const logBox = document.getElementById('tradeLog');
-            const time = new Date().toLocaleTimeString();
-
-            logBox.innerText = `[${time}] A enviar ordem real de mercado de ${symbol} para a Bybit...\n` + logBox.innerText;
-
-            try {
-                const res = await fetch('/place-order', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbol: symbol, side: 'Buy', qty: '5' })
-                });
-
-                const data = await res.json();
-                if (data.success && data.result?.retCode === 0) {
-                    logBox.innerText = `[${time}] ✅ ORDEM EXECUTADA NA BYBIT! Order ID: ${data.result.result.orderId}\n` + logBox.innerText;
-                } else {
-                    const msg = data.error?.retMsg || data.message || "Erro desconhecido";
-                    logBox.innerText = `[${time}] ⚠️ Resposta da Bybit: ${msg}\n` + logBox.innerText;
+                // Registos autónomos gerados pelo servidor na nuvem
+                const logRes = await fetch('/logs');
+                const logData = await logRes.json();
+                if (logData && logData.logs) {
+                    document.getElementById('tradeLog').innerText = logData.logs.join('\n');
                 }
-            } catch (err) {
-                logBox.innerText = `[${time}] ❌ Erro de comunicação: ${err.message}\n` + logBox.innerText;
+            } catch (e) {
+                console.error("Erro na atualização automática:", e);
             }
-
-            atualizarDados();
         }
 
         window.addEventListener('DOMContentLoaded', () => {
-            atualizarDados();
-            setInterval(atualizarDados, 3000);
+            atualizarPainel();
+            setInterval(atualizarPainel, 3000); // Atualiza a tela a cada 3 segundos
         });
     </script>
 
