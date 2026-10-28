@@ -16,7 +16,7 @@ const SECRET_KEY = process.env.BYBIT_SECRET_KEY || '';
 const BYBIT_URL = 'https://api.bybit.com';
 
 let systemLogs = ["[Auto] Sistema MaxIncome iniciado na nuvem."];
-let ordemJaExecutada = false; // Garante que executa a primeira ordem automática logo
+let ordemTentada = false;
 
 function addLog(msg) {
     const time = new Date().toLocaleTimeString();
@@ -34,22 +34,24 @@ app.get('/logs', (req, res) => {
     res.json({ success: true, logs: systemLogs });
 });
 
-// Função para disparar a ordem real na Bybit
+// Função para disparar a ordem real na Bybit com parâmetros validados
 async function dispararOrdemRealBybit(symbol, side, qty) {
     if (!API_KEY || !SECRET_KEY) {
-        addLog("⚠️ Erro: Chaves API da Bybit não encontradas nas variáveis do Render.");
+        addLog("⚠️ Erro: Chaves API da Bybit ausentes nas variáveis do Render.");
         return;
     }
 
     try {
         const timestamp = Date.now().toString();
         const recvWindow = '5000';
+        
+        // Na Bybit spot, para XRPUSDT, a quantidade deve ser uma string formatada corretamente
         const bodyData = {
             category: "spot",
             symbol: symbol,
             side: side,
             orderType: "Market",
-            qty: qty
+            qty: qty.toString()
         };
 
         const jsonBody = JSON.stringify(bodyData);
@@ -57,6 +59,8 @@ async function dispararOrdemRealBybit(symbol, side, qty) {
             .createHmac('sha256', SECRET_KEY)
             .update(timestamp + API_KEY + recvWindow + jsonBody)
             .digest('hex');
+
+        addLog(`🔄 A enviar ordem para a Bybit (${symbol}, Qty: ${qty})...`);
 
         const response = await axios.post(`${BYBIT_URL}/v5/order/create`, bodyData, {
             headers: {
@@ -68,18 +72,19 @@ async function dispararOrdemRealBybit(symbol, side, qty) {
             }
         });
 
-        if (response.data?.retCode === 0) {
-            addLog(`✅ SUCESSO! Ordem ${side} de ${qty} ${symbol} executada na Bybit! ID: ${response.data.result.orderId}`);
-            ordemJaExecutada = true;
+        const resData = response.data;
+        if (resData?.retCode === 0) {
+            addLog(`✅ SUCESSO! Ordem executada! ID: ${resData.result.orderId}`);
         } else {
-            addLog(`⚠️ Resposta da Bybit: ${response.data?.retMsg}`);
+            addLog(`⚠️ Rejeitado pela Bybit [${resData?.retCode}]: ${resData?.retMsg}`);
         }
     } catch (error) {
-        addLog(`❌ Falha ao enviar ordem: ${error.response?.data?.retMsg || error.message}`);
+        const errDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+        addLog(`❌ Erro na requisição da ordem: ${errDetails}`);
     }
 }
 
-// Motor Autónomo que roda sozinho na nuvem
+// Motor Autónomo na nuvem
 setInterval(async () => {
     try {
         const symbol = "XRPUSDT";
@@ -90,20 +95,20 @@ setInterval(async () => {
         const list = tickerRes.data?.result?.list;
         if (list && list.length > 0) {
             const price = parseFloat(list[0].lastPrice);
-            addLog(`🔍 Mercado ${symbol} a $${price.toFixed(4)}. Robô ativo.`);
-
-            // Se ainda não executou nesta sessão, dispara a primeira ordem real de 5 XRP (~$6.5)
-            if (!ordemJaExecutada) {
-                addLog(`🚀 A disparar primeira ordem real autónoma para a Bybit...`);
-                await dispararOrdemRealBybit(symbol, "Buy", "5");
+            
+            // Tenta executar a primeira ordem autónoma apenas uma vez ao iniciar
+            if (!ordemTentada) {
+                ordemTentada = true;
+                // Comprando 6 XRP (~$7.9 USDT), respeitando o saldo de 9 USDT
+                await dispararOrdemRealBybit(symbol, "Buy", "6");
             }
         }
     } catch (err) {
-        // Ignora erros momentâneos de conexão
+        // Ignora falhas temporárias de rede
     }
-}, 15000);
+}, 10000);
 
-// Consulta de saldo unificado
+// Consulta de saldo
 app.get('/binance-account', async (req, res) => {
     try {
         if (!API_KEY || !SECRET_KEY) throw new Error("Chaves em falta");
