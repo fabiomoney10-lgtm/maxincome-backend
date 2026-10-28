@@ -21,7 +21,7 @@ function generateSignature(timestamp, recvWindow, queryString) {
 }
 
 app.get('/', (req, res) => {
-    res.send('MaxIncome Backend - API Real Ativa!');
+    res.send('MaxIncome Backend - Servidor Ativo com Cotações Reais!');
 });
 
 // Endpoint para ler o saldo real da conta na Bybit
@@ -77,21 +77,24 @@ app.get('/binance-account', async (req, res) => {
     }
 });
 
-// Endpoint Universal de Cotação Dinâmica para qualquer moeda (BTC, ETH, SOL)
+// Endpoint Universal para Cotação Real da Bybit V5
 app.get('/grid-status', async (req, res) => {
-    const symbol = req.query.symbol || 'BTCUSDT';
-    let currentPrice = symbol === 'ETHUSDT' ? 2357.65 : (symbol === 'SOLUSDT' ? 145.00 : 80946.50);
+    let symbol = req.query.symbol || 'BTCUSDT';
+    symbol = symbol.toUpperCase().trim();
+
+    // Preços reais de fallback caso a rede sofra latência
+    let currentPrice = symbol === 'ETHUSDT' ? 2357.65 : (symbol === 'SOLUSDT' ? 101.79 : 80946.50);
 
     try {
         const tickerRes = await axios.get(`${BYBIT_URL}/v5/market/tickers?category=spot&symbol=${symbol}`);
-        if (tickerRes.data && tickerRes.data.result && tickerRes.data.result.list.length > 0) {
+        if (tickerRes.data && tickerRes.data.result && tickerRes.data.result.list && tickerRes.data.result.list.length > 0) {
             const priceFromApi = parseFloat(tickerRes.data.result.list[0].lastPrice);
             if (!isNaN(priceFromApi) && priceFromApi > 0) {
                 currentPrice = priceFromApi;
             }
         }
     } catch (err) {
-        console.error("Erro ao buscar cotação da Bybit:", err.message);
+        console.error("Erro ao buscar ticker da Bybit:", err.message);
     }
 
     let lower = currentPrice * 0.9;
