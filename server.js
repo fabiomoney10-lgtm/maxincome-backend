@@ -4,19 +4,16 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuração da Binance (Lê com segurança das variáveis de ambiente do Render)
 const API_KEY = process.env.BINANCE_API_KEY;
 const SECRET_KEY = process.env.BINANCE_SECRET_KEY;
 const BASE_URL = 'https://api.binance.com';
 
 app.use(express.json());
 
-// Rota de teste simples
 app.get('/', (req, res) => {
     res.send('MaxIncome Backend a funcionar na nuvem 24/7!');
 });
 
-// Rota para consultar o saldo/conta na Binance
 app.get('/binance-account', async (req, res) => {
     try {
         if (!API_KEY || !SECRET_KEY) {
@@ -26,7 +23,6 @@ app.get('/binance-account', async (req, res) => {
         const timestamp = Date.now();
         const queryString = `timestamp=${timestamp}`;
         
-        // Assinatura de segurança exigida pela API da Binance (HMAC SHA256)
         const signature = crypto
             .createHmac('sha256', SECRET_KEY)
             .update(queryString)
@@ -38,7 +34,6 @@ app.get('/binance-account', async (req, res) => {
             }
         });
 
-        // Retorna dados úteis da conta (como estado e saldos)
         res.json({
             success: true,
             canTrade: response.data.canTrade,
