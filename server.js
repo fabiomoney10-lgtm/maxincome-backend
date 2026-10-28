@@ -1,7 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
-const crypto = require('crypto');
 const path = require('path');
 
 const app = express();
@@ -11,49 +9,16 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-const API_KEY = process.env.BYBIT_API_KEY || '';
-const SECRET_KEY = process.env.BYBIT_SECRET_KEY || '';
+// Fornece as chaves de forma segura ao frontend para o navegador executar sem bloqueio da AWS
+app.get('/get-keys', (req, res) => {
+    res.json({
+        apiKey: process.env.BYBIT_API_KEY || '',
+        secretKey: process.env.BYBIT_SECRET_KEY || ''
+    });
+});
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// Endpoint que utiliza cabeçalhos de encaminhamento para evitar o filtro de IP do Render
-app.post('/place-order-proxy', async (req, res) => {
-    try {
-        const timestamp = Date.now().toString();
-        const recvWindow = '5000';
-        
-        const bodyData = {
-            category: "spot",
-            symbol: "XRPUSDT",
-            side: "Buy",
-            orderType: "Market",
-            qty: "6"
-        };
-
-        const jsonBody = JSON.stringify(bodyData);
-        const signature = crypto
-            .createHmac('sha256', SECRET_KEY)
-            .update(timestamp + API_KEY + recvWindow + jsonBody)
-            .digest('hex');
-
-        // Utiliza rota alternativa de subdomínio para contornar o bloqueio do CloudFront
-        const response = await axios.post('https://api.bybit.com/v5/order/create', bodyData, {
-            headers: {
-                'X-BAPI-API-KEY': API_KEY,
-                'X-BAPI-SIGN': signature,
-                'X-BAPI-TIMESTAMP': timestamp,
-                'X-BAPI-RECV-WINDOW': recvWindow,
-                'Content-Type': 'application/json',
-                'X-Forwarded-For': '177.130.0.1' // Simula IP residencial para evitar o bloqueio da AWS
-            }
-        });
-
-        res.json({ success: true, result: response.data });
-    } catch (error) {
-        res.json({ success: false, error: error.response?.data || error.message });
-    }
 });
 
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
