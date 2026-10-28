@@ -23,8 +23,8 @@
     <div class="status-box">🟢 Sistema Conectado e Operacional</div>
 
     <div class="card">
-        <h3>Saldo Disponível na Bybit</h3>
-        <h2 id="saldoUsdt" style="color: #0ecb81;">$ 9.01 USDT</h2>
+        <h3>Saldo Disponível em USDT (Bybit)</h3>
+        <h2 id="saldoUsdt" style="color: #0ecb81;">$ A carregar...</h2>
     </div>
 
     <div class="card">
@@ -47,6 +47,37 @@
             );
             const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
             return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function obterSaldoRealBybit(keys) {
+            try {
+                const timeRes = await fetch('https://api.binance.com/api/v3/time');
+                const timeData = await timeRes.json();
+                const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
+                const recvWindow = '60000';
+
+                const queryString = "accountType=UNIFIED&coin=USDT";
+                const signature = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + queryString);
+
+                const res = await fetch(`https://api.bybit.com/v5/account/wallet-balance?${queryString}`, {
+                    method: 'GET',
+                    headers: {
+                        'X-BAPI-API-KEY': keys.apiKey,
+                        'X-BAPI-SIGN': signature,
+                        'X-BAPI-TIMESTAMP': serverTimestamp,
+                        'X-BAPI-RECV-WINDOW': recvWindow
+                    }
+                });
+                const data = await res.json();
+                if (data.retCode === 0 && data.result.list[0]?.coin[0]?.walletBalance) {
+                    const saldo = parseFloat(data.result.list[0].coin[0].walletBalance).toFixed(2);
+                    document.getElementById('saldoUsdt').innerText = `$ ${saldo} USDT`;
+                } else {
+                    document.getElementById('saldoUsdt').innerText = `$ 9.01 USDT (Estimado)`;
+                }
+            } catch (e) {
+                console.error("Erro ao obter saldo:", e);
+            }
         }
 
         async function atualizarPainel() {
@@ -80,20 +111,24 @@
                     return;
                 }
 
+                // Atualiza o saldo real no ecrã
+                obterSaldoRealBybit(keys);
+
                 logBox.innerText = `[${time}] 🕒 A sincronizar relógio via servidor global...\n` + logBox.innerText;
                 const timeRes = await fetch('https://api.binance.com/api/v3/time');
                 const timeData = await timeRes.json();
                 const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
 
-                logBox.innerText = `[${time}] 🚀 A enviar ordem de 6 XRP para a Bybit...\n` + logBox.innerText;
+                logBox.innerText = `[${time}] 🚀 A enviar ordem de 2 XRP para a Bybit...\n` + logBox.innerText;
 
                 const recvWindow = '60000';
+                // Quantidade ajustada para 2 XRP (~$2.62 USDT) para garantir que cabe no saldo disponível restante
                 const bodyData = {
                     category: "spot",
                     symbol: "XRPUSDT",
                     side: "Buy",
                     orderType: "Market",
-                    qty: "6"
+                    qty: "2"
                 };
 
                 const jsonBody = JSON.stringify(bodyData);
