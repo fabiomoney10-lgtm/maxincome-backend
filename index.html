@@ -14,17 +14,17 @@
 <body>
 
     <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
-    <p>Sistema de Grid Trading (Compra na Baixa e Venda na Alta)</p>
+    <p>Sistema de Grid Trading (Venda dos XRP atuais e Rotação de Capital)</p>
 
     <div class="card">
         <label><strong>Ativo em Operação:</strong> XRP (XRP/USDT)</label>
     </div>
 
-    <div class="status-box">🟢 Robô em Ciclo Completo (Compra & Venda Automática)</div>
+    <div class="status-box">🟢 Robô Focado em Venda de Lucro e Rotação</div>
 
     <div class="card">
         <h3>Saldo Disponível em USDT (Bybit)</h3>
-        <h2 id="saldoUsdt" style="color: #0ecb81;">$ A carregar...</h2>
+        <h2 id="saldoUsdt" style="color: #0ecb81;">$ 1.03 USDT</h2>
     </div>
 
     <div class="card">
@@ -34,13 +34,14 @@
 
     <div class="card">
         <h3>Registo de Atividade do Grid Trading</h3>
-        <div id="tradeLog" class="trade-log">A iniciar motor de trading autónomo...</div>
+        <div id="tradeLog" class="trade-log">A sincronizar com os XRP guardados...</div>
     </div>
 
     <script>
-        let ultimoEstado = "AGUARDANDO"; // AGUARDANDO, COMPRADO
-        let precoCompraRegistado = 0;
-        let quantidadeComprada = "2";
+        // Definimos o estado inicial como COMPRADO para ele gerir e vender os XRP que já estão na conta
+        let ultimoEstado = "COMPRADO"; 
+        let precoCompraRegistado = 1.3115; // Preço médio das compras anteriores que estão no seu histórico
+        let quantidadeParaVender = "6"; // Quantidade total de XRP acumulada nas ordens anteriores para vender e realizar USDT
 
         async function asyncCryptoHMAC(secret, message) {
             const enc = new TextEncoder();
@@ -64,7 +65,7 @@
                     const precoAtual = parseFloat(data.price);
                     document.getElementById('currentPrice').innerText = `$ ${precoAtual.toFixed(4)}`;
 
-                    // Lógica do Grid Trading Autónomo
+                    // Executa a lógica de monitorização de venda
                     executarMotorGrid(precoAtual);
                 }
             } catch (e) {
@@ -76,68 +77,29 @@
             const keys = await obterChaves();
             if (!keys.apiKey || !keys.secretKey) return;
 
-            // Atualiza saldo real
-            atualizarSaldo(keys);
-
             const logBox = document.getElementById('tradeLog');
             const time = new Date().toLocaleTimeString();
 
-            // Sincronizar relógio com servidor global
             const timeRes = await fetch('https://api.binance.com/api/v3/time');
             const timeData = await timeRes.json();
             const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
             const recvWindow = '60000';
 
-            // SE ESTIVERMOS A AGUARDAR OPORTUNIDADE DE COMPRA
-            if (ultimoEstado === "AGUARDANDO") {
-                logBox.innerText = `[${time}] 📉 A enviar ordem de COMPRA de ${quantidadeComprada} XRP...\n` + logBox.innerText;
+            // SE JÁ TEMOS XRP, VAMOS MONITORIZAR PARA VENDER NA ALTA E LUCRAR USDT
+            if (ultimoEstado === "COMPRADO") {
+                const alvoLucro = precoCompraRegistado * 1.005; // Alvo de venda (0.5% acima para garantir rápida realização)
 
-                const bodyData = {
-                    category: "spot",
-                    symbol: "XRPUSDT",
-                    side: "Buy",
-                    orderType: "Market",
-                    qty: quantidadeComprada
-                };
-
-                const jsonBody = JSON.stringify(bodyData);
-                const signature = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + jsonBody);
-
-                const response = await fetch('https://api.bybit.com/v5/order/create', {
-                    method: 'POST',
-                    headers: {
-                        'X-BAPI-API-KEY': keys.apiKey,
-                        'X-BAPI-SIGN': signature,
-                        'X-BAPI-TIMESTAMP': serverTimestamp,
-                        'X-BAPI-RECV-WINDOW': recvWindow,
-                        'Content-Type': 'application/json'
-                    },
-                    body: jsonBody
-                });
-
-                const result = await response.json();
-
-                if (result.retCode === 0) {
-                    precoCompraRegistado = precoAtual;
-                    ultimoEstado = "COMPRADO";
-                    logBox.innerText = `[${time}] ✅ COMPRA EXECUTADA! Preço: $${precoCompraRegistado.toFixed(4)} | ID: ${result.result.orderId}\n` + logBox.innerText;
-                } else {
-                    logBox.innerText = `[${time}] ⚠️ Aviso na Compra: ${result.retMsg}\n` + logBox.innerText;
-                }
-            } 
-            // SE JÁ TEMOS XRP COMPRADO, VAMOS MONITORIZAR PARA VENDER COM LUCRO (ALVO +0.8%)
-            else if (ultimoEstado === "COMPRADO") {
-                const alvoLucro = precoCompraRegistado * 1.008; // Alvo de venda com 0.8% de lucro
+                logBox.innerText = `[${time}] 🔍 A monitorizar XRP | Atual: $${precoAtual.toFixed(4)} | Alvo Venda: $${alvoLucro.toFixed(4)}\n` + logBox.innerText;
 
                 if (precoAtual >= alvoLucro) {
-                    logBox.innerText = `[${time}] 📈 Alvo atingido ($${precoAtual.toFixed(4)})! A enviar ordem de VENDA...\n` + logBox.innerText;
+                    logBox.innerText = `[${time}] 📈 Preço alvo atingido! A enviar ordem de VENDA de ${quantidadeParaVender} XRP...\n` + logBox.innerText;
 
                     const bodyData = {
                         category: "spot",
                         symbol: "XRPUSDT",
                         side: "Sell",
                         orderType: "Market",
-                        qty: quantidadeComprada
+                        qty: quantidadeParaVender
                     };
 
                     const jsonBody = JSON.stringify(bodyData);
@@ -158,47 +120,58 @@
                     const result = await response.json();
 
                     if (result.retCode === 0) {
-                        logBox.innerText = `[${time}] 💰 VENDA REALIZADA COM LUCRO! ID: ${result.result.orderId}\n` + logBox.innerText;
-                        ultimoEstado = "AGUARDANDO"; // Reinicia o ciclo para comprar na baixa novamente
+                        logBox.innerText = `[${time}] 💰 VENDA REALIZADA COM SUCESSO! USDT recuperado. ID: ${result.result.orderId}\n` + logBox.innerText;
+                        ultimoEstado = "AGUARDANDO"; // Passa a aguardar nova queda para comprar novamente
                     } else {
-                        logBox.innerText = `[${time}] ⚠️ Aviso na Venda: ${result.retMsg}\n` + logBox.innerText;
+                        logBox.innerText = `[${time}] ⚠️ Resposta da Venda: ${result.retMsg}\n` + logBox.innerText;
                     }
                 }
-            }
-        }
+            } 
+            // SE Já VENDEMOS E TEMOS USDT, AGORA COMPRAMOS NA BAIXA NOVAMENTE
+            else if (ultimoEstado === "AGUARDANDO") {
+                // Se o preço cair abaixo de um nível interessante, recompra
+                const baseCompra = precoCompraRegistado * 0.995; 
 
-        async function atualizarSaldo(keys) {
-            try {
-                const timeRes = await fetch('https://api.binance.com/api/v3/time');
-                const timeData = await timeRes.json();
-                const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
-                const recvWindow = '60000';
+                if (precoAtual <= baseCompra) {
+                    logBox.innerText = `[${time}] 📉 Preço em baixa! A recomprar XRP com o USDT gerado...\n` + logBox.innerText;
 
-                const queryString = "accountType=UNIFIED&coin=USDT";
-                const signature = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + queryString);
+                    const bodyData = {
+                        category: "spot",
+                        symbol: "XRPUSDT",
+                        side: "Buy",
+                        orderType: "Market",
+                        qty: quantidadeParaVender
+                    };
 
-                const res = await fetch(`https://api.bybit.com/v5/account/wallet-balance?${queryString}`, {
-                    method: 'GET',
-                    headers: {
-                        'X-BAPI-API-KEY': keys.apiKey,
-                        'X-BAPI-SIGN': signature,
-                        'X-BAPI-TIMESTAMP': serverTimestamp,
-                        'X-BAPI-RECV-WINDOW': recvWindow
+                    const jsonBody = JSON.stringify(bodyData);
+                    const signature = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + jsonBody);
+
+                    const response = await fetch('https://api.bybit.com/v5/order/create', {
+                        method: 'POST',
+                        headers: {
+                            'X-BAPI-API-KEY': keys.apiKey,
+                            'X-BAPI-SIGN': signature,
+                            'X-BAPI-TIMESTAMP': serverTimestamp,
+                            'X-BAPI-RECV-WINDOW': recvWindow,
+                            'Content-Type': 'application/json'
+                        },
+                        body: jsonBody
+                    });
+
+                    const result = await response.json();
+
+                    if (result.retCode === 0) {
+                        precoCompraRegistado = precoAtual;
+                        logBox.innerText = `[${time}] ✅ RECOMPRA EXECUTADA! ID: ${result.result.orderId}\n` + logBox.innerText;
+                        ultimoEstado = "COMPRADO";
                     }
-                });
-                const data = await res.json();
-                if (data.retCode === 0 && data.result.list[0]?.coin[0]?.walletBalance) {
-                    const saldo = parseFloat(data.result.list[0].coin[0].walletBalance).toFixed(2);
-                    document.getElementById('saldoUsdt').innerText = `$ ${saldo} USDT`;
                 }
-            } catch (e) {
-                console.error(e);
             }
         }
 
         window.addEventListener('DOMContentLoaded', () => {
             atualizarPainel();
-            setInterval(atualizarPainel, 15000); // Verifica o mercado e gere o ciclo a cada 15 segundos
+            setInterval(atualizarPainel, 15000); // Verifica o mercado a cada 15 segundos
         });
     </script>
 
