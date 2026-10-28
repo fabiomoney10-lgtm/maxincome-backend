@@ -9,6 +9,7 @@
         .card { background: #1e222d; padding: 20px; margin: 15px auto; width: 60%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         select, button { padding: 10px; font-size: 16px; border-radius: 5px; border: none; background: #f0b90b; color: #000; font-weight: bold; cursor: pointer; }
         .status-box { color: #0ecb81; font-weight: bold; margin-bottom: 20px; }
+        .trade-log { background: #11141d; padding: 15px; border-radius: 5px; margin-top: 10px; font-family: monospace; color: #0ecb81; text-align: left; max-height: 120px; overflow-y: auto; font-size: 14px; }
     </style>
 </head>
 <body>
@@ -17,34 +18,40 @@
     <p>Plataforma Autónoma de Grid Trading & Rendimento Passivo</p>
 
     <div class="card">
+        <label for="symbolSelect"><strong>Selecione o Par Real:</strong> </label>
         <select id="symbolSelect" onchange="atualizarDados()">
-            <option value="BTCUSDT">Bitcoin (BTC/USDT)</option>
-            <option value="ETHUSDT">Ethereum (ETH/USDT)</option>
-            <option value="SOLUSDT">Solana (SOL/USDT)</option>
+            <option value="XRPUSDT" selected>XRP (XRP/USDT) - Recomendado p/ Saldo $9</option>
+            <option value="DOGEUSDT">DOGE (DOGE/USDT) - Compatível</option>
+            <option value="ADAUSDT">ADA (ADA/USDT) - Compatível</option>
+            <option value="BTCUSDT">Bitcoin (BTC/USDT) - Requer >$10</option>
         </select>
         <button onclick="atualizarDados()">Atualizar Agora</button>
     </div>
 
-    <div class="status-box">🟢 Sistema Autónomo Ativo (Atualização Automática)</div>
+    <div class="status-box">🟢 Motor Ligado na Nuvem - Operando em Tempo Real</div>
 
     <div class="card">
-        <h3>Saldo USDT</h3>
-        <h2 id="saldoUsdt" style="color: #0ecb81;">$ 8.99</h2>
+        <h3>Saldo Disponível na Bybit</h3>
+        <h2 id="saldoUsdt" style="color: #0ecb81;">$ 9.01 USDT</h2>
     </div>
 
     <div class="card">
-        <h3>Cotação Atual (<span id="currentSymbol">BTCUSDT</span>)</h3>
+        <h3>Cotação Atual (<span id="currentSymbol">XRPUSDT</span>)</h3>
         <h2 id="currentPrice" style="color: #f0b90b;">$ --</h2>
+    </div>
+
+    <div class="card">
+        <h3>Registo do Robô em Execução</h3>
+        <div id="tradeLog" class="trade-log">Monitorizando cotações e executando grelhas automaticamente...</div>
     </div>
 
     <script>
         async function atualizarDados() {
-            const symbolSelect = document.getElementById('symbolSelect');
-            const symbol = symbolSelect.value;
+            const symbol = document.getElementById('symbolSelect').value;
             document.getElementById('currentSymbol').innerText = symbol;
 
             try {
-                // Busca a cotação atualizada do servidor
+                // Atualiza Preço
                 const res = await fetch(`/grid-status?symbol=${symbol}`);
                 const data = await res.json();
                 
@@ -52,19 +59,19 @@
                     document.getElementById('currentPrice').innerText = `$ ${data.currentPrice}`;
                 }
 
-                // Busca o saldo atualizado da conta
+                // Atualiza Saldo
                 const accRes = await fetch('/binance-account');
                 const accData = await accRes.json();
                 
                 if (accData && accData.success && accData.balances && accData.balances[0]) {
-                    document.getElementById('saldoUsdt').innerText = `$ ${accData.balances[0].free}`;
+                    document.getElementById('saldoUsdt').innerText = `$ ${accData.balances[0].free} USDT`;
                 }
             } catch (e) {
-                console.error("Erro na atualização automática:", e);
+                console.error("Erro ao atualizar painel:", e);
             }
         }
 
-        // Inicia assim que a página carrega e repete obrigatoriamente a cada 3 segundos
+        // Execução Automática em Tempo Real (3 Segundos)
         window.addEventListener('DOMContentLoaded', () => {
             atualizarDados();
             setInterval(atualizarDados, 3000);
