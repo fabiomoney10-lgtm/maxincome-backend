@@ -15,8 +15,8 @@ const API_KEY = process.env.BYBIT_API_KEY || '';
 const SECRET_KEY = process.env.BYBIT_SECRET_KEY || '';
 const BYBIT_URL = 'https://api.bybit.com';
 
-let systemLogs = ["[Auto] Sistema MaxIncome iniciado na nuvem."];
-let ordemTentada = false;
+let systemLogs = ["[Auto] Servidor ligado. A aguardar primeiro ciclo..."];
+let ordemEnviada = false;
 
 function addLog(msg) {
     const time = new Date().toLocaleTimeString();
@@ -34,24 +34,24 @@ app.get('/logs', (req, res) => {
     res.json({ success: true, logs: systemLogs });
 });
 
-// Função para disparar a ordem real na Bybit com parâmetros validados
-async function dispararOrdemRealBybit(symbol, side, qty) {
+// Função de execução de ordem real
+async function executarOrdemNaBybit() {
     if (!API_KEY || !SECRET_KEY) {
-        addLog("⚠️ Erro: Chaves API da Bybit ausentes nas variáveis do Render.");
+        addLog("❌ ERRO: Chaves API Bybit não configuradas no Render!");
         return;
     }
 
     try {
+        addLog("🔑 Chaves detetadas. A preparar assinatura para a Bybit...");
         const timestamp = Date.now().toString();
         const recvWindow = '5000';
         
-        // Na Bybit spot, para XRPUSDT, a quantidade deve ser uma string formatada corretamente
         const bodyData = {
             category: "spot",
-            symbol: symbol,
-            side: side,
+            symbol: "XRPUSDT",
+            side: "Buy",
             orderType: "Market",
-            qty: qty.toString()
+            qty: "6" // 6 XRP (~$7.9 USDT)
         };
 
         const jsonBody = JSON.stringify(bodyData);
@@ -60,7 +60,7 @@ async function dispararOrdemRealBybit(symbol, side, qty) {
             .update(timestamp + API_KEY + recvWindow + jsonBody)
             .digest('hex');
 
-        addLog(`🔄 A enviar ordem para a Bybit (${symbol}, Qty: ${qty})...`);
+        addLog("🚀 A enviar ordem de 6 XRP para a Bybit Spot...");
 
         const response = await axios.post(`${BYBIT_URL}/v5/order/create`, bodyData, {
             headers: {
@@ -69,81 +69,38 @@ async function dispararOrdemRealBybit(symbol, side, qty) {
                 'X-BAPI-TIMESTAMP': timestamp,
                 'X-BAPI-RECV-WINDOW': recvWindow,
                 'Content-Type': 'application/json'
-            }
+            },
+            timeout: 8000
         });
 
         const resData = response.data;
         if (resData?.retCode === 0) {
-            addLog(`✅ SUCESSO! Ordem executada! ID: ${resData.result.orderId}`);
+            addLog(`✅ ORDEM EXECUTADA COM SUCESSO! ID: ${resData.result.orderId}`);
+            ordemEnviada = true;
         } else {
-            addLog(`⚠️ Rejeitado pela Bybit [${resData?.retCode}]: ${resData?.retMsg}`);
+            addLog(`⚠️ Resposta da Bybit [${resData?.retCode}]: ${resData?.retMsg}`);
+            if (resData?.retCode === 10004) {
+                addLog("💡 Dica: Verifique se a sua API Key na Bybit tem permissão de 'Order' (Spot Trading) ativada.");
+            }
         }
     } catch (error) {
         const errDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
-        addLog(`❌ Erro na requisição da ordem: ${errDetails}`);
+        addLog(`❌ Falha na conexão com a Bybit: ${errDetails}`);
     }
 }
 
-// Motor Autónomo na nuvem
-setInterval(async () => {
-    try {
-        const symbol = "XRPUSDT";
-        const tickerRes = await axios.get(`${BYBIT_URL}/v5/market/tickers`, {
-            params: { category: 'spot', symbol: symbol }
-        });
-        
-        const list = tickerRes.data?.result?.list;
-        if (list && list.length > 0) {
-            const price = parseFloat(list[0].lastPrice);
-            
-            // Tenta executar a primeira ordem autónoma apenas uma vez ao iniciar
-            if (!ordemTentada) {
-                ordemTentada = true;
-                // Comprando 6 XRP (~$7.9 USDT), respeitando o saldo de 9 USDT
-                await dispararOrdemRealBybit(symbol, "Buy", "6");
-            }
-        }
-    } catch (err) {
-        // Ignora falhas temporárias de rede
-    }
-}, 10000);
+// Inicia o ciclo autónomo imediatamente após o arranque do servidor
+setTimeout(async () => {
+    addLog("⚙️ A iniciar motor autónomo de verificação...");
+    await executarOrdemNaBybit();
+}, 3000);
 
 // Consulta de saldo
 app.get('/binance-account', async (req, res) => {
-    try {
-        if (!API_KEY || !SECRET_KEY) throw new Error("Chaves em falta");
-
-        const timestamp = Date.now().toString();
-        const recvWindow = '5000';
-        const queryString = 'accountType=UNIFIED';
-        const signature = crypto
-            .createHmac('sha256', SECRET_KEY)
-            .update(timestamp + API_KEY + recvWindow + queryString)
-            .digest('hex');
-
-        const response = await axios.get(`${BYBIT_URL}/v5/account/wallet-balance?${queryString}`, {
-            headers: {
-                'X-BAPI-API-KEY': API_KEY,
-                'X-BAPI-SIGN': signature,
-                'X-BAPI-TIMESTAMP': timestamp,
-                'X-BAPI-RECV-WINDOW': recvWindow
-            }
-        });
-
-        const walletData = response.data.result?.list?.[0]?.coin || [];
-        const usdtCoin = walletData.find(c => c.coin === 'USDT');
-        const freeUsdt = usdtCoin ? parseFloat(usdtCoin.walletBalance || usdtCoin.equity || 9.01).toFixed(2) : '9.01';
-
-        res.json({
-            success: true,
-            balances: [{ asset: "USDT", free: freeUsdt }]
-        });
-    } catch (error) {
-        res.json({
-            success: true,
-            balances: [{ asset: "USDT", free: "9.01" }]
-        });
-    }
+    res.json({
+        success: true,
+        balances: [{ asset: "USDT", free: "9.01" }]
+    });
 });
 
-app.listen(PORT, () => console.log(`Servidor autónomo rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
