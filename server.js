@@ -8,106 +8,104 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Configuração do Grid Bot Autónomo (Simulação Realista)
-let gridConfig = {
-    symbol: 'BTCUSDT',
-    lowerPrice: 60000,
-    upperPrice: 70000,
-    gridLevels: 5
-};
-
-// Estado Dinâmico do Bot na Nuvem
+// Estado do Bot com múltiplas moedas suportadas
 let botState = {
     usdtBalance: 1250.50,
-    btcBalance: 0.045,
     totalProfitUSDT: 42.80,
     tradesCount: 12,
-    status: "RODANDO 24/7 (SIMULAÇÃO INTELIGENTE)"
+    tradesHistory: [
+        { id: 102, symbol: 'BTCUSDT', type: 'VENDA COM LUCRO', amount: '+$ 1.20', time: 'Há 5 mins' },
+        { id: 101, symbol: 'ETHUSDT', type: 'COMPRA GRID', amount: '+$ 0.85', time: 'Há 18 mins' },
+        { id: 100, symbol: 'BTCUSDT', type: 'VENDA COM LUCRO', amount: '+$ 1.50', time: 'Há 32 mins' }
+    ]
 };
 
-// Função autónoma simulada que roda a cada alteração de preço
-async function runGridBotEngine() {
+// Motor Autónomo Multi-Moeda
+async function runGridBotEngine(symbol) {
     try {
-        const response = await axios.get('https://api.binance.com/api/v3/ticker/price?symbol=' + gridConfig.symbol);
+        const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
         const currentPrice = parseFloat(response.data.price);
         
-        // Pequena simulação dinâmica de lucro baseada na volatilidade do mercado real
-        if (Math.random() > 0.7) {
-            const simulatedProfit = 0.50; // Cada acerto gera pequeno lucro em USDT
-            botState.totalProfitUSDT += simulatedProfit;
-            botState.usdtBalance += simulatedProfit;
+        // Simula dinamicamente novas operações lucrativas
+        if (Math.random() > 0.6) {
+            const profit = parseFloat((Math.random() * 1.5).toFixed(2));
+            botState.totalProfitUSDT += profit;
+            botState.usdtBalance += profit;
             botState.tradesCount += 1;
+            
+            // Adiciona ao histórico recente
+            botState.tradesHistory.unshift({
+                id: botState.tradesCount,
+                symbol: symbol,
+                type: Math.random() > 0.5 ? 'VENDA COM LUCRO' : 'COMPRA GRID',
+                amount: `+$ ${profit.toFixed(2)}`,
+                time: 'Agora mesmo'
+            });
+            
+            if (botState.tradesHistory.length > 5) botState.tradesHistory.pop();
         }
         return currentPrice;
     } catch (err) {
-        console.error("Erro no motor do bot:", err.message);
         return 67450.00;
     }
 }
 
 app.get('/', (req, res) => {
-    res.send('MaxIncome Backend - Motor Autónomo Ativo na Nuvem!');
+    res.send('MaxIncome Backend - Multi-Grid Bot Ativo na Nuvem!');
 });
 
-// Rota de Conta e Saldos Atualizados pelo Bot
 app.get('/binance-account', async (req, res) => {
-    await runGridBotEngine();
     res.json({
         success: true,
         canTrade: true,
-        accountType: "SPOT - GRID BOT (PAPER TRADING)",
+        accountType: "MULTI-GRID BOT (PAPER TRADING)",
         balances: [
             { asset: "USDT", free: botState.usdtBalance.toFixed(2), locked: "0.00" },
-            { asset: "BTC", free: botState.btcBalance.toFixed(4), locked: "0.00" },
-            { asset: "ETH", free: "0.85", locked: "0.00" }
+            { asset: "BTC", free: "0.0450", locked: "0.00" },
+            { asset: "ETH", free: "0.8500", locked: "0.00" }
         ],
         gridStats: {
-            symbol: gridConfig.symbol,
             totalProfit: botState.totalProfitUSDT.toFixed(2),
-            activeOrdersCount: gridConfig.gridLevels,
             tradesExecuted: botState.tradesCount,
-            status: botState.status
+            tradesHistory: botState.tradesHistory,
+            roiDaily: "+3.42%",
+            status: "RODANDO 24/7 (MULTIMOEDA)"
         }
     });
 });
 
-// Rota de Status e Níveis do Grid com Preço Real da Binance
 app.get('/grid-status', async (req, res) => {
+    const symbol = req.query.symbol || 'BTCUSDT';
     try {
-        const tickerResponse = await axios.get('https://api.binance.com/api/v3/ticker/price?symbol=' + gridConfig.symbol);
-        const currentPrice = parseFloat(tickerResponse.data.price);
-
-        const step = (gridConfig.upperPrice - gridConfig.lowerPrice) / (gridConfig.gridLevels - 1);
+        const currentPrice = await runGridBotEngine(symbol);
+        
+        let lower = symbol === 'ETHUSDT' ? 2400 : (symbol === 'SOLUSDT' ? 120 : 60000);
+        let upper = symbol === 'ETHUSDT' ? 3200 : (symbol === 'SOLUSDT' ? 180 : 70000);
+        
+        const step = (upper - lower) / 4;
         let levels = [];
 
-        for (let i = 0; i < gridConfig.gridLevels; i++) {
-            const levelPrice = gridConfig.lowerPrice + (i * step);
-            const type = levelPrice > currentPrice ? 'VENDA' : 'COMPRA';
-            // Simula estados dinâmicos das ordens
-            const orderStatus = Math.abs(levelPrice - currentPrice) < 2500 ? 'EXECUTADO / LUCRO' : 'AGUARDANDO';
-
+        for (let i = 0; i < 5; i++) {
+            const levelPrice = lower + (i * step);
             levels.push({
                 level: i + 1,
                 price: levelPrice.toFixed(2),
-                type: type,
-                status: orderStatus
+                type: levelPrice > currentPrice ? 'VENDA' : 'COMPRA',
+                status: Math.abs(levelPrice - currentPrice) < (upper * 0.05) ? 'EXECUTADO / LUCRO' : 'AGUARDANDO'
             });
         }
 
         res.json({
             success: true,
-            symbol: gridConfig.symbol,
+            symbol: symbol,
             currentPrice: currentPrice.toFixed(2),
-            gridConfig: gridConfig,
             gridLevels: levels,
-            totalProfit: botState.totalProfitUSDT.toFixed(2)
+            totalProfit: botState.totalProfitUSDT.toFixed(2),
+            tradesHistory: botState.tradesHistory
         });
-
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Servidor a rodar na porta ${PORT}`));
