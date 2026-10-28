@@ -22,10 +22,10 @@
             <option value="ETHUSDT">Ethereum (ETH/USDT)</option>
             <option value="SOLUSDT">Solana (SOL/USDT)</option>
         </select>
-        <button onclick="atualizarDados()">Atualizar Tudo</button>
+        <button onclick="atualizarDados()">Atualizar Agora</button>
     </div>
 
-    <div class="status-box">🟢 Conectado ao Motor em Nuvem 24/7 com Sucesso!</div>
+    <div class="status-box">🟢 Sistema Autónomo Ativo (Atualização Automática)</div>
 
     <div class="card">
         <h3>Saldo USDT</h3>
@@ -33,14 +33,18 @@
     </div>
 
     <div class="card">
-        <h3>Cotação Atual</h3>
+        <h3>Cotação Atual (<span id="currentSymbol">BTCUSDT</span>)</h3>
         <h2 id="currentPrice" style="color: #f0b90b;">$ --</h2>
     </div>
 
     <script>
         async function atualizarDados() {
-            const symbol = document.getElementById('symbolSelect').value;
+            const symbolSelect = document.getElementById('symbolSelect');
+            const symbol = symbolSelect.value;
+            document.getElementById('currentSymbol').innerText = symbol;
+
             try {
+                // Busca a cotação atualizada do servidor
                 const res = await fetch(`/grid-status?symbol=${symbol}`);
                 const data = await res.json();
                 
@@ -48,6 +52,7 @@
                     document.getElementById('currentPrice').innerText = `$ ${data.currentPrice}`;
                 }
 
+                // Busca o saldo atualizado da conta
                 const accRes = await fetch('/binance-account');
                 const accData = await accRes.json();
                 
@@ -55,14 +60,15 @@
                     document.getElementById('saldoUsdt').innerText = `$ ${accData.balances[0].free}`;
                 }
             } catch (e) {
-                console.error("Erro ao atualizar dados:", e);
+                console.error("Erro na atualização automática:", e);
             }
         }
 
-        window.onload = () => {
+        // Inicia assim que a página carrega e repete obrigatoriamente a cada 3 segundos
+        window.addEventListener('DOMContentLoaded', () => {
             atualizarDados();
             setInterval(atualizarDados, 3000);
-        };
+        });
     </script>
 
 </body>
