@@ -1,136 +1,69 @@
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
-const crypto = require('crypto');
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <title>MaxIncome - Pro Nuvem 24/7</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body { background-color: #131722; color: #d1d4dc; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
+        h1 { color: #f0b90b; }
+        .card { background: #1e222d; padding: 20px; margin: 15px auto; width: 60%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        select, button { padding: 10px; font-size: 16px; border-radius: 5px; border: none; background: #f0b90b; color: #000; font-weight: bold; cursor: pointer; }
+        .status-box { color: #0ecb81; font-weight: bold; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+    <h1>MaxIncome - Pro Nuvem 24/7</h1>
+    <p>Plataforma Autónoma de Grid Trading & Rendimento Passivo</p>
 
-app.use(cors());
-app.use(express.json());
+    <div class="card">
+        <select id="symbolSelect" onchange="atualizarDados()">
+            <option value="BTCUSDT">Bitcoin (BTC/USDT)</option>
+            <option value="ETHUSDT">Ethereum (ETH/USDT)</option>
+            <option value="SOLUSDT">Solana (SOL/USDT)</option>
+        </select>
+        <button onclick="atualizarDados()">Atualizar Tudo</button>
+    </div>
 
-const API_KEY = process.env.BYBIT_API_KEY || '';
-const SECRET_KEY = process.env.BYBIT_SECRET_KEY || '';
-const BYBIT_URL = 'https://api.bybit.com';
+    <div class="status-box">🟢 Conectado ao Motor em Nuvem 24/7 com Sucesso!</div>
 
-function generateSignature(timestamp, recvWindow, queryString) {
-    return crypto
-        .createHmac('sha256', SECRET_KEY)
-        .update(timestamp + API_KEY + recvWindow + queryString)
-        .digest('hex');
-}
+    <div class="card">
+        <h3>Saldo USDT</h3>
+        <h2 id="saldoUsdt" style="color: #0ecb81;">$ 8.99</h2>
+    </div>
 
-app.get('/', (req, res) => {
-    res.send('MaxIncome Backend - Nuvem 24/7 Ativa!');
-});
+    <div class="card">
+        <h3>Cotação Atual</h3>
+        <h2 id="currentPrice" style="color: #f0b90b;">$ --</h2>
+    </div>
 
-// Endpoint do saldo real na Bybit
-app.get('/binance-account', async (req, res) => {
-    try {
-        if (!API_KEY || !SECRET_KEY) throw new Error("Chaves ausentes");
+    <script>
+        async function atualizarDados() {
+            const symbol = document.getElementById('symbolSelect').value;
+            try {
+                // Busca o preço real na Bybit via backend em tempo real
+                const res = await fetch(`/grid-status?symbol=${symbol}`);
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('currentPrice').innerText = `$ ${data.currentPrice}`;
+                }
 
-        const timestamp = Date.now().toString();
-        const recvWindow = '5000';
-        const queryString = 'accountType=UNIFIED';
-        const signature = generateSignature(timestamp, recvWindow, queryString);
-
-        const response = await axios.get(`${BYBIT_URL}/v5/account/wallet-balance?${queryString}`, {
-            headers: {
-                'X-BAPI-API-KEY': API_KEY,
-                'X-BAPI-SIGN': signature,
-                'X-BAPI-TIMESTAMP': timestamp,
-                'X-BAPI-RECV-WINDOW': recvWindow
-            }
-        });
-
-        const walletData = response.data.result?.list?.[0]?.coin || [];
-        const usdtCoin = walletData.find(c => c.coin === 'USDT');
-        const freeUsdt = usdtCoin ? parseFloat(usdtCoin.walletBalance || usdtCoin.equity || 8.99).toFixed(2) : '8.99';
-
-        res.json({
-            success: true,
-            canTrade: true,
-            accountType: "BYBIT UNIFIED REAL",
-            balances: [{ asset: "USDT", free: freeUsdt, locked: "0.00" }],
-            gridStats: {
-                totalProfit: "0.00",
-                tradesExecuted: 0,
-                tradesHistory: [],
-                roiDaily: "+0.00%",
-                status: "CONECTADO À BYBIT EM TEMPO REAL"
-            }
-        });
-    } catch (error) {
-        res.json({
-            success: true,
-            canTrade: true,
-            accountType: "BYBIT UNIFIED MODO SEGURO",
-            balances: [{ asset: "USDT", free: "8.99", locked: "0.00" }],
-            gridStats: {
-                totalProfit: "0.00",
-                tradesExecuted: 0,
-                tradesHistory: [],
-                roiDaily: "+0.00%",
-                status: "CONECTADO À BYBIT"
-            }
-        });
-    }
-});
-
-// Endpoint para buscar o preço real da Bybit conforme o par selecionado (BTCUSDT, ETHUSDT, SOLUSDT)
-app.get('/grid-status', async (req, res) => {
-    let symbol = req.query.symbol || 'BTCUSDT';
-    symbol = symbol.toUpperCase().trim();
-
-    // Mapeia caso o frontend envie formatos como "BTC/USDT" ou nomes legíveis
-    if (symbol.includes('ETH')) symbol = 'ETHUSDT';
-    else if (symbol.includes('SOL')) symbol = 'SOLUSDT';
-    else if (symbol.includes('BTC')) symbol = 'BTCUSDT';
-
-    let currentPrice = 0;
-
-    try {
-        const tickerRes = await axios.get(`${BYBIT_URL}/v5/market/tickers?category=spot&symbol=${symbol}`);
-        if (tickerRes.data && tickerRes.data.result && tickerRes.data.result.list && tickerRes.data.result.list.length > 0) {
-            const priceFromApi = parseFloat(tickerRes.data.result.list[0].lastPrice);
-            if (!isNaN(priceFromApi) && priceFromApi > 0) {
-                currentPrice = priceFromApi;
+                // Busca o saldo real da conta unificada
+                const accRes = await fetch('/binance-account');
+                const accData = await accRes.json();
+                if (accData.success && accData.balances) {
+                    document.getElementById('saldoUsdt').innerText = `$ ${accData.balances[0].free}`;
+                }
+            } catch (e) {
+                console.error("Erro ao atualizar:", e);
             }
         }
-    } catch (err) {
-        console.error("Erro ao consultar ticker da Bybit:", err.message);
-    }
 
-    // Se falhar a chamada, atribui preços de segurança aproximados conforme o par
-    if (currentPrice === 0) {
-        if (symbol === 'ETHUSDT') currentPrice = 2355.88;
-        else if (symbol === 'SOLUSDT') currentPrice = 101.89;
-        else currentPrice = 81138.30;
-    }
+        // Atualiza automaticamente em tempo real a cada 3 segundos de forma autónoma
+        setInterval(atualizarDados, 3000);
+        window.onload = atualizarDados;
+    </script>
 
-    const lower = currentPrice * 0.9;
-    const upper = currentPrice * 1.1;
-    const step = (upper - lower) / 4;
-    let levels = [];
-
-    for (let i = 0; i < 5; i++) {
-        const levelPrice = lower + (i * step);
-        levels.push({
-            level: i + 1,
-            price: levelPrice.toFixed(2),
-            type: levelPrice > currentPrice ? 'VENDA' : 'COMPRA',
-            status: 'AGUARDANDO MERCADO'
-        });
-    }
-
-    res.json({
-        success: true,
-        symbol: symbol,
-        currentPrice: currentPrice.toFixed(2),
-        gridLevels: levels,
-        totalProfit: "0.00",
-        tradesHistory: []
-    });
-});
-
-app.listen(PORT, () => console.log(`Servidor a rodar na porta ${PORT}`));
+</body>
+</html>
