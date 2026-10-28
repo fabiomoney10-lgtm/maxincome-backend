@@ -7,7 +7,6 @@
         body { background-color: #131722; color: #d1d4dc; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
         h1 { color: #f0b90b; }
         .card { background: #1e222d; padding: 20px; margin: 15px auto; width: 60%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        select { padding: 10px; font-size: 16px; border-radius: 5px; border: none; background: #f0b90b; color: #000; font-weight: bold; }
         .status-box { color: #0ecb81; font-weight: bold; margin-bottom: 20px; font-size: 16px; }
         .trade-log { background: #11141d; padding: 15px; border-radius: 5px; margin-top: 10px; font-family: monospace; color: #0ecb81; text-align: left; max-height: 180px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
     </style>
@@ -15,7 +14,7 @@
 <body>
 
     <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
-    <p>Sistema de Grid Trading 100% Autónomo em Tempo Real</p>
+    <p>Sistema de Grid Trading em Tempo Real</p>
 
     <div class="card">
         <label><strong>Ativo em Operação:</strong> XRP (XRP/USDT)</label>
@@ -34,12 +33,22 @@
     </div>
 
     <div class="card">
-        <h3>Registo de Atividade Autónoma</h3>
-        <div id="tradeLog" class="trade-log">A iniciar conexão com o mercado...</div>
+        <h3>Registo de Atividade</h3>
+        <div id="tradeLog" class="trade-log">A iniciar ligação...</div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script>
-        let ordemDisparada = false;
+        let ordemExecutada = false;
+
+        async function asyncCryptoHMAC(secret, message) {
+            const enc = new TextEncoder();
+            const key = await crypto.subtle.importKey(
+                "raw", enc.encode(secret), { name: "HMAC", hash: { name: "SHA-256" } }, false, ["sign"]
+            );
+            const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+            return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
 
         async function atualizarPainel() {
             try {
@@ -49,29 +58,63 @@
                     document.getElementById('currentPrice').innerText = `$ ${parseFloat(data.price).toFixed(4)}`;
                 }
 
-                if (!ordemDisparada) {
-                    ordemDisparada = true;
-                    executarOrdemAutomatica();
+                if (!ordemExecutada) {
+                    ordemExecutada = true;
+                    executarOrdemNavegador();
                 }
             } catch (e) {
                 console.error(e);
             }
         }
 
-        async function executarOrdemAutomatica() {
+        async function executarOrdemNavegador() {
             const logBox = document.getElementById('tradeLog');
             const time = new Date().toLocaleTimeString();
-            logBox.innerText = `[${time}] 🚀 A disparar ordem automática de 6 XRP para a Bybit...\n` + logBox.innerText;
 
             try {
-                const res = await fetch('/place-order-proxy', { method: 'POST' });
-                const data = await res.json();
+                logBox.innerText = `[${time}] 🔑 A obter credenciais seguras...\n` + logBox.innerText;
+                const keysRes = await fetch('/get-keys');
+                const keys = await keysRes.json();
 
-                if (data.success && data.result?.retCode === 0) {
-                    logBox.innerText = `[${time}] ✅ ORDEM EXECUTADA COM SUCESSO! ID: ${data.result.result.orderId}\n` + logBox.innerText;
+                if (!keys.apiKey || !keys.secretKey) {
+                    logBox.innerText = `[${time}] ❌ Erro: Chaves API em falta no Render.\n` + logBox.innerText;
+                    return;
+                }
+
+                logBox.innerText = `[${time}] 🚀 A enviar ordem de 6 XRP diretamente para a Bybit...\n` + logBox.innerText;
+
+                const timestamp = Date.now().toString();
+                const recvWindow = '5000';
+                const bodyData = {
+                    category: "spot",
+                    symbol: "XRPUSDT",
+                    side: "Buy",
+                    orderType: "Market",
+                    qty: "6"
+                };
+
+                const jsonBody = JSON.stringify(bodyData);
+                const signature = await asyncCryptoHMAC(keys.secretKey, timestamp + keys.apiKey + recvWindow + jsonBody);
+
+                // Executa direto pelo navegador do utilizador (sem bloqueio da Amazon AWS)
+                const response = await fetch('https://api.bybit.com/v5/order/create', {
+                    method: 'POST',
+                    headers: {
+                        'X-BAPI-API-KEY': keys.apiKey,
+                        'X-BAPI-SIGN': signature,
+                        'X-BAPI-TIMESTAMP': timestamp,
+                        'X-BAPI-RECV-WINDOW': recvWindow,
+                        'Content-Type': 'application/json'
+                    },
+                    body: jsonBody
+                });
+
+                const result = await response.json();
+
+                if (result.retCode === 0) {
+                    logBox.innerText = `[${time}] ✅ ORDEM EXECUTADA COM SUCESSO! ID: ${result.result.orderId}\n` + logBox.innerText;
                 } else {
-                    const msg = data.error?.retMsg || JSON.stringify(data.error) || "Erro desconhecido";
-                    logBox.innerText = `[${time}] ⚠️ Resposta da Bybit: ${msg}\n` + logBox.innerText;
+                    logBox.innerText = `[${time}] ⚠️ Resposta da Bybit: ${result.retMsg}\n` + logBox.innerText;
                 }
             } catch (err) {
                 logBox.innerText = `[${time}] ❌ Erro: ${err.message}\n` + logBox.innerText;
@@ -80,7 +123,7 @@
 
         window.addEventListener('DOMContentLoaded', () => {
             atualizarPainel();
-            setInterval(atualizarPainel, 4000);
+            setInterval(atualizarPainel, 5000);
         });
     </script>
 
