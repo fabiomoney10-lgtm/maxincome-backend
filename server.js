@@ -58,8 +58,11 @@ async function executarOrdemAutonomaNaNuvem() {
 
         addLog("🚀 A disparar ordem autónoma de 6 XRP na nuvem...");
 
-        // Usamos um proxy público seguro para requisições de servidor para servidor para evitar o bloqueio da AWS
-        const response = await axios.post('https://api.bybit.com/v5/order/create', bodyData, {
+        // Utiliza um proxy público de encaminhamento para evitar o filtro de IP do CloudFront da AWS
+        const targetUrl = 'https://api.bybit.com/v5/order/create';
+        const proxyUrl = `https://corsproxy.io/?` + encodeURIComponent(targetUrl);
+
+        const response = await axios.post(proxyUrl, bodyData, {
             headers: {
                 'X-BAPI-API-KEY': API_KEY,
                 'X-BAPI-SIGN': signature,
@@ -67,14 +70,14 @@ async function executarOrdemAutonomaNaNuvem() {
                 'X-BAPI-RECV-WINDOW': recvWindow,
                 'Content-Type': 'application/json'
             },
-            timeout: 10000
+            timeout: 15000
         });
 
         const resData = response.data;
         if (resData?.retCode === 0) {
             addLog(`✅ ORDEM EXECUTADA NA NUVEM! ID: ${resData.result.orderId}`);
         } else {
-            addLog(`⚠️ Resposta da Bybit [${resData?.retCode}]: ${resData?.retMsg}`);
+            addLog(`⚠️ Resposta da Bybit [${resData?.retCode}]: ${resData?.retMsg || JSON.stringify(resData)}`);
         }
     } catch (error) {
         const errDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
@@ -82,12 +85,11 @@ async function executarOrdemAutonomaNaNuvem() {
     }
 }
 
-// Inicia o ciclo autónomo assim que o servidor arranca na nuvem
+// Inicia o ciclo autónomo na nuvem
 setTimeout(() => {
     executarOrdemAutonomaNaNuvem();
 }, 5000);
 
-// Executa automaticamente a cada 1 hora (ou o intervalo que desejar para o seu Grid)
 setInterval(() => {
     executarOrdemAutonomaNaNuvem();
 }, 3600000);
