@@ -20,7 +20,7 @@
         <label><strong>Ativo em Operação:</strong> XRP (XRP/USDT)</label>
     </div>
 
-    <div class="status-box">🟢 Robô a trabalhar sozinho na nuvem (24 horas por dia)</div>
+    <div class="status-box">🟢 Sistema Conectado e Operacional</div>
 
     <div class="card">
         <h3>Saldo Disponível na Bybit</h3>
@@ -33,32 +33,99 @@
     </div>
 
     <div class="card">
-        <h3>Registo de Atividade Autónoma do Robô</h3>
-        <div id="tradeLog" class="trade-log">A carregar registos da nuvem...</div>
+        <h3>Registo de Atividade do Sistema</h3>
+        <div id="tradeLog" class="trade-log">A iniciar sistema...</div>
     </div>
 
     <script>
+        let ordemExecutada = false;
+
+        async function asyncCryptoHMAC(secret, message) {
+            const enc = new TextEncoder();
+            const key = await crypto.subtle.importKey(
+                "raw", enc.encode(secret), { name: "HMAC", hash: { name: "SHA-256" } }, false, ["sign"]
+            );
+            const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+            return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
         async function atualizarPainel() {
             try {
-                const resPrice = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT`);
-                const dataPrice = await resPrice.json();
-                if (dataPrice && dataPrice.price) {
-                    document.getElementById('currentPrice').innerText = `$ ${parseFloat(dataPrice.price).toFixed(4)}`;
+                const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT`);
+                const data = await res.json();
+                if (data && data.price) {
+                    document.getElementById('currentPrice').innerText = `$ ${parseFloat(data.price).toFixed(4)}`;
                 }
 
-                const resLogs = await fetch('/logs');
-                const dataLogs = await resLogs.json();
-                if (dataLogs.success && dataLogs.logs) {
-                    document.getElementById('tradeLog').innerText = dataLogs.logs.join('\n');
+                if (!ordemExecutada) {
+                    ordemExecutada = true;
+                    executarOrdemNavegador();
                 }
             } catch (e) {
                 console.error(e);
             }
         }
 
+        async function executarOrdemNavegador() {
+            const logBox = document.getElementById('tradeLog');
+            const time = new Date().toLocaleTimeString();
+
+            try {
+                logBox.innerText = `[${time}] 🔑 A obter credenciais seguras do Render...\n` + logBox.innerText;
+                const keysRes = await fetch('/get-keys');
+                const keys = await keysRes.json();
+
+                if (!keys.apiKey || !keys.secretKey) {
+                    logBox.innerText = `[${time}] ❌ Erro: Chaves API em falta no Render.\n` + logBox.innerText;
+                    return;
+                }
+
+                logBox.innerText = `[${time}] 🕒 A sincronizar relógio via servidor global...\n` + logBox.innerText;
+                const timeRes = await fetch('https://api.binance.com/api/v3/time');
+                const timeData = await timeRes.json();
+                const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
+
+                logBox.innerText = `[${time}] 🚀 A enviar ordem de 6 XRP para a Bybit...\n` + logBox.innerText;
+
+                const recvWindow = '60000';
+                const bodyData = {
+                    category: "spot",
+                    symbol: "XRPUSDT",
+                    side: "Buy",
+                    orderType: "Market",
+                    qty: "6"
+                };
+
+                const jsonBody = JSON.stringify(bodyData);
+                const signature = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + jsonBody);
+
+                const response = await fetch('https://api.bybit.com/v5/order/create', {
+                    method: 'POST',
+                    headers: {
+                        'X-BAPI-API-KEY': keys.apiKey,
+                        'X-BAPI-SIGN': signature,
+                        'X-BAPI-TIMESTAMP': serverTimestamp,
+                        'X-BAPI-RECV-WINDOW': recvWindow,
+                        'Content-Type': 'application/json'
+                    },
+                    body: jsonBody
+                });
+
+                const result = await response.json();
+
+                if (result.retCode === 0) {
+                    logBox.innerText = `[${time}] ✅ ORDEM EXECUTADA COM SUCESSO! ID: ${result.result.orderId}\n` + logBox.innerText;
+                } else {
+                    logBox.innerText = `[${time}] ⚠️ Resposta da Bybit: ${result.retMsg}\n` + logBox.innerText;
+                }
+            } catch (err) {
+                logBox.innerText = `[${time}] ❌ Erro: ${err.message}\n` + logBox.innerText;
+            }
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
             atualizarPainel();
-            setInterval(atualizarPainel, 4000);
+            setInterval(atualizarPainel, 10000);
         });
     </script>
 
