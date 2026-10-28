@@ -15,8 +15,8 @@ const API_KEY = process.env.BYBIT_API_KEY || '';
 const SECRET_KEY = process.env.BYBIT_SECRET_KEY || '';
 const BYBIT_URL = 'https://api.bybit.com';
 
-// Registo de atividades autónomas na nuvem
-let systemLogs = ["[Auto] Robô autónomo iniciado na nuvem 24/7."];
+let systemLogs = ["[Auto] Sistema MaxIncome iniciado na nuvem."];
+let ordemJaExecutada = false; // Garante que executa a primeira ordem automática logo
 
 function addLog(msg) {
     const time = new Date().toLocaleTimeString();
@@ -30,15 +30,14 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Endpoint para o painel ler os registos autónomos
 app.get('/logs', (req, res) => {
     res.json({ success: true, logs: systemLogs });
 });
 
-// Função interna que executa ordens automáticas na Bybit
-async function executarOrdemAutonoma(symbol, side, qty) {
+// Função para disparar a ordem real na Bybit
+async function dispararOrdemRealBybit(symbol, side, qty) {
     if (!API_KEY || !SECRET_KEY) {
-        addLog("⚠️ Chaves API Bybit não configuradas no Render.");
+        addLog("⚠️ Erro: Chaves API da Bybit não encontradas nas variáveis do Render.");
         return;
     }
 
@@ -70,16 +69,17 @@ async function executarOrdemAutonoma(symbol, side, qty) {
         });
 
         if (response.data?.retCode === 0) {
-            addLog(`✅ Ordem ${side} executada com sucesso em ${symbol}! ID: ${response.data.result.orderId}`);
+            addLog(`✅ SUCESSO! Ordem ${side} de ${qty} ${symbol} executada na Bybit! ID: ${response.data.result.orderId}`);
+            ordemJaExecutada = true;
         } else {
-            addLog(`⚠️ Aviso da Bybit (${symbol}): ${response.data?.retMsg}`);
+            addLog(`⚠️ Resposta da Bybit: ${response.data?.retMsg}`);
         }
     } catch (error) {
-        addLog(`❌ Erro ao enviar ordem autónoma: ${error.response?.data?.retMsg || error.message}`);
+        addLog(`❌ Falha ao enviar ordem: ${error.response?.data?.retMsg || error.message}`);
     }
 }
 
-// Loop Autónomo de Grid Trading a cada 40 segundos na nuvem
+// Motor Autónomo que roda sozinho na nuvem
 setInterval(async () => {
     try {
         const symbol = "XRPUSDT";
@@ -90,17 +90,20 @@ setInterval(async () => {
         const list = tickerRes.data?.result?.list;
         if (list && list.length > 0) {
             const price = parseFloat(list[0].lastPrice);
-            addLog(`🔍 Monitorizando ${symbol} | Preço Atual: $${price.toFixed(4)} | Robô em busca de oportunidade de grelha...`);
-            
-            // Exemplo de lógica autónoma: se houver saldo e variação favorável, o robô dispara
-            // Para proteger o seu saldo de 9 USDT, o robô monitoriza e valida margens antes de cada ciclo.
+            addLog(`🔍 Mercado ${symbol} a $${price.toFixed(4)}. Robô ativo.`);
+
+            // Se ainda não executou nesta sessão, dispara a primeira ordem real de 5 XRP (~$6.5)
+            if (!ordemJaExecutada) {
+                addLog(`🚀 A disparar primeira ordem real autónoma para a Bybit...`);
+                await dispararOrdemRealBybit(symbol, "Buy", "5");
+            }
         }
     } catch (err) {
-        // Silencia erros temporários de rede para manter o loop contínuo
+        // Ignora erros momentâneos de conexão
     }
-}, 40000);
+}, 15000);
 
-// Consulta de saldo unificado para o painel
+// Consulta de saldo unificado
 app.get('/binance-account', async (req, res) => {
     try {
         if (!API_KEY || !SECRET_KEY) throw new Error("Chaves em falta");
