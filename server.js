@@ -19,35 +19,40 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Sincronização direta e exata com o ticker Spot da Bybit
+// Captura o preço exato da Bybit Spot sem travar
 app.get('/grid-status', async (req, res) => {
     let symbol = req.query.symbol || 'XRPUSDT';
     symbol = symbol.toUpperCase().trim();
 
-    let currentPrice = 0;
-
     try {
         const response = await axios.get(`${BYBIT_URL}/v5/market/tickers`, {
-            params: { category: 'spot', symbol: symbol }
+            params: { category: 'spot', symbol: symbol },
+            timeout: 4000
         });
 
         const list = response.data?.result?.list;
         if (list && list.length > 0) {
-            currentPrice = parseFloat(list[0].lastPrice);
+            const realPrice = parseFloat(list[0].lastPrice);
+            return res.json({
+                success: true,
+                symbol: symbol,
+                currentPrice: realPrice.toFixed(4),
+                status: "ONLINE E SINCRONIZADO"
+            });
         }
     } catch (err) {
-        console.error("Erro na API da Bybit:", err.message);
+        console.error("Erro ao buscar ticker:", err.message);
     }
 
     res.json({
-        success: true,
+        success: false,
         symbol: symbol,
-        currentPrice: currentPrice > 0 ? currentPrice.toFixed(4) : "1.3150",
-        status: "ONLINE E SINCRONIZADO"
+        currentPrice: "0.0000",
+        status: "FALHA NA CONEXÃO COM A BYBIT"
     });
 });
 
-// Execução de ordem real
+// Execução de ordem real na Bybit
 app.post('/place-order', async (req, res) => {
     const { symbol, side, qty } = req.body;
 
