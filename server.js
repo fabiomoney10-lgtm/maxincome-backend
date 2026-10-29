@@ -53,16 +53,14 @@ async function calcularFatorVolatilidade() {
     }
 }
 
-// 2. Filtro de Tendência (Média Móvel Exponencial - EMA 20)
+// 2. Filtro de Tendência (EMA 20)
 async function verificarTendenciaAlta() {
     try {
         const res = await fetch('https://api.binance.com/api/v3/klines?symbol=XRPUSDT&interval=15m&limit=25');
         const klines = await res.json();
-        if (!Array.isArray(klines) || klines.length < 20) return true; // Permite por defeito se falhar
+        if (!Array.isArray(klines) || klines.length < 20) return true;
 
         const precosFecho = klines.map(c => parseFloat(c[4]));
-        
-        // Calcular EMA de 20 períodos
         const k = 2 / (20 + 1);
         let ema = precosFecho[0];
         for (let i = 1; i < precosFecho.length; i++) {
@@ -70,8 +68,6 @@ async function verificarTendenciaAlta() {
         }
 
         const precoAtual = precosFecho[precosFecho.length - 1];
-        
-        // Retorna verdadeiro se o preço estiver acima ou muito próximo da EMA (evita quedas livres)
         return precoAtual >= (ema * 0.992);
     } catch (e) {
         return true; 
@@ -83,7 +79,7 @@ async function executarMotorNuvem() {
     const secretKey = process.env.BYBIT_SECRET_KEY;
 
     if (!apiKey || !secretKey) {
-        console.log("[Robô Nuvem EMA] Chaves API não configuradas.");
+        console.log("[Robô Nuvem Juros Compostos] Chaves API não configuradas.");
         return;
     }
 
@@ -126,12 +122,12 @@ async function executarMotorNuvem() {
         const percentualLucroDinamico = await calcularFatorVolatilidade();
         const tendenciaFavoravel = await verificarTendenciaAlta();
 
-        console.log(`[Robô EMA+ATR] XRP: $${precoAtual} | Tendência OK: ${tendenciaFavoravel} | USDT: ${usdtDisponivel.toFixed(2)} | XRP: ${xrpDisponivel.toFixed(2)}`);
+        console.log(`[Robô Juros Compostos] XRP: $${precoAtual} | USDT: ${usdtDisponivel.toFixed(2)} | XRP: ${xrpDisponivel.toFixed(2)}`);
 
         if (xrpDisponivel >= 1.5) {
             const alvoLucro = ultimoPrecoCompra * (1 + percentualLucroDinamico);
             if (precoAtual >= alvoLucro) {
-                console.log(`[Robô EMA] Alvo atingido ($${precoAtual} >= $${alvoLucro.toFixed(4)}). A vender...`);
+                console.log(`[Robô Compostos] Alvo atingido ($${precoAtual} >= $${alvoLucro.toFixed(4)}). A vender...`);
 
                 const bodyData = {
                     category: "spot",
@@ -156,17 +152,22 @@ async function executarMotorNuvem() {
                     body: jsonBody
                 });
                 const resJson = await resp.json();
-                console.log(`[Robô EMA] Resposta Venda:`, resJson.retMsg);
+                console.log(`[Robô Compostos] Resposta Venda:`, resJson.retMsg);
             }
         } else if (usdtDisponivel >= 1.0 && tendenciaFavoravel) {
-            console.log(`[Robô EMA] Tendência favorável e USDT disponível. A executar compra...`);
+            // 3. Juros Compostos Geométricos: Usa 35% do saldo USDT total disponível para a compra
+            const capitalAlocadoUSDT = usdtDisponivel * 0.35;
+            let quantidadeParaComprar = Math.floor(capitalAlocadoUSDT / precoAtual);
+            if (quantidadeParaComprar < 1) quantidadeParaComprar = 1; // Garante o mínimo exigido pela corretora
+
+            console.log(`[Robô Compostos] Capital reinvestido: $${capitalAlocadoUSDT.toFixed(2)} USDT -> A comprar ${quantidadeParaComprar} XRP...`);
 
             const bodyData = {
                 category: "spot",
                 symbol: "XRPUSDT",
                 side: "Buy",
                 orderType: "Market",
-                qty: "2"
+                qty: quantidadeParaComprar.toString()
             };
 
             const jsonBody = JSON.stringify(bodyData);
@@ -187,18 +188,16 @@ async function executarMotorNuvem() {
             if (resJson.retCode === 0) {
                 ultimoPrecoCompra = precoAtual;
             }
-            console.log(`[Robô EMA] Resposta Compra:`, resJson.retMsg);
-        } else if (usdtDisponivel >= 1.0 && !tendenciaFavoravel) {
-            console.log(`[Robô EMA] Tendência de queda acentuada detetada. Compras pausadas por segurança.`);
+            console.log(`[Robô Compostos] Resposta Compra:`, resJson.retMsg);
         }
 
     } catch (e) {
-        console.error("[Robô EMA Erro]:", e.message);
+        console.error("[Robô Compostos Erro]:", e.message);
     }
 }
 
 setInterval(executarMotorNuvem, 30000);
 
 app.listen(PORT, () => {
-    console.log(`Servidor com Filtro de Tendência EMA rodando na porta ${PORT}`);
+    console.log(`Servidor com Juros Compostos Autónomo rodando na porta ${PORT}`);
 });
