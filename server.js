@@ -27,32 +27,54 @@ function gerarAssinaturaHMAC(secret, message) {
 
 let ultimoPrecoCompra = 1.3115;
 
-// Função matemática para calcular a volatilidade (ATR simplificado) baseada nas últimas velas
+// 1. Cálculo do ATR (Volatilidade Dinâmica)
 async function calcularFatorVolatilidade() {
     try {
         const res = await fetch('https://api.binance.com/api/v3/klines?symbol=XRPUSDT&interval=15m&limit=10');
         const klines = await res.json();
-        if (!Array.isArray(klines) || klines.length === 0) return 0.008; // Valor padrão de segurança (0.8%)
+        if (!Array.isArray(klines) || klines.length === 0) return 0.008;
 
         let somaRanges = 0;
         for (let candle of klines) {
             const high = parseFloat(candle[2]);
             const low = parseFloat(candle[3]);
             const close = parseFloat(candle[4]);
-            const range = (high - low) / close; // Amplitude percentual da vela
-            somaRanges += range;
+            somaRanges += (high - low) / close;
         }
 
         const mediaVolatilidade = somaRanges / klines.length;
-        
-        // O lucro alvo será proporcional à volatilidade detetada (mínimo de 0.5%, máximo de 2%)
         let fatorAlvo = mediaVolatilidade * 0.8; 
         if (fatorAlvo < 0.005) fatorAlvo = 0.005;
         if (fatorAlvo > 0.02) fatorAlvo = 0.02;
 
         return fatorAlvo;
     } catch (e) {
-        return 0.008; // Fallback de segurança
+        return 0.008;
+    }
+}
+
+// 2. Filtro de Tendência (Média Móvel Exponencial - EMA 20)
+async function verificarTendenciaAlta() {
+    try {
+        const res = await fetch('https://api.binance.com/api/v3/klines?symbol=XRPUSDT&interval=15m&limit=25');
+        const klines = await res.json();
+        if (!Array.isArray(klines) || klines.length < 20) return true; // Permite por defeito se falhar
+
+        const precosFecho = klines.map(c => parseFloat(c[4]));
+        
+        // Calcular EMA de 20 períodos
+        const k = 2 / (20 + 1);
+        let ema = precosFecho[0];
+        for (let i = 1; i < precosFecho.length; i++) {
+            ema = (precosFecho[i] * k) + (ema * (1 - k));
+        }
+
+        const precoAtual = precosFecho[precosFecho.length - 1];
+        
+        // Retorna verdadeiro se o preço estiver acima ou muito próximo da EMA (evita quedas livres)
+        return precoAtual >= (ema * 0.992);
+    } catch (e) {
+        return true; 
     }
 }
 
@@ -61,7 +83,7 @@ async function executarMotorNuvem() {
     const secretKey = process.env.BYBIT_SECRET_KEY;
 
     if (!apiKey || !secretKey) {
-        console.log("[Robô Nuvem ATR] Chaves API não configuradas.");
+        console.log("[Robô Nuvem EMA] Chaves API não configuradas.");
         return;
     }
 
@@ -101,14 +123,15 @@ async function executarMotorNuvem() {
             }
         }
 
-        // Calcula a margem de lucro dinâmica com base no ATR
         const percentualLucroDinamico = await calcularFatorVolatilidade();
-        console.log(`[Robô ATR] XRP: $${precoAtual} | Volatilidade Alvo: ${(percentualLucroDinamico*100).toFixed(2)}% | USDT: ${usdtDisponivel.toFixed(2)} | XRP: ${xrpDisponivel.toFixed(2)}`);
+        const tendenciaFavoravel = await verificarTendenciaAlta();
+
+        console.log(`[Robô EMA+ATR] XRP: $${precoAtual} | Tendência OK: ${tendenciaFavoravel} | USDT: ${usdtDisponivel.toFixed(2)} | XRP: ${xrpDisponivel.toFixed(2)}`);
 
         if (xrpDisponivel >= 1.5) {
             const alvoLucro = ultimoPrecoCompra * (1 + percentualLucroDinamico);
             if (precoAtual >= alvoLucro) {
-                console.log(`[Robô ATR] Alvo dinâmico atingido ($${precoAtual} >= $${alvoLucro.toFixed(4)}). A vender...`);
+                console.log(`[Robô EMA] Alvo atingido ($${precoAtual} >= $${alvoLucro.toFixed(4)}). A vender...`);
 
                 const bodyData = {
                     category: "spot",
@@ -133,10 +156,10 @@ async function executarMotorNuvem() {
                     body: jsonBody
                 });
                 const resJson = await resp.json();
-                console.log(`[Robô ATR] Resposta Venda:`, resJson.retMsg);
+                console.log(`[Robô EMA] Resposta Venda:`, resJson.retMsg);
             }
-        } else if (usdtDisponivel >= 1.0) {
-            console.log(`[Robô ATR] Saldo USDT detetado. A preparar compra na baixa...`);
+        } else if (usdtDisponivel >= 1.0 && tendenciaFavoravel) {
+            console.log(`[Robô EMA] Tendência favorável e USDT disponível. A executar compra...`);
 
             const bodyData = {
                 category: "spot",
@@ -164,16 +187,18 @@ async function executarMotorNuvem() {
             if (resJson.retCode === 0) {
                 ultimoPrecoCompra = precoAtual;
             }
-            console.log(`[Robô ATR] Resposta Compra:`, resJson.retMsg);
+            console.log(`[Robô EMA] Resposta Compra:`, resJson.retMsg);
+        } else if (usdtDisponivel >= 1.0 && !tendenciaFavoravel) {
+            console.log(`[Robô EMA] Tendência de queda acentuada detetada. Compras pausadas por segurança.`);
         }
 
     } catch (e) {
-        console.error("[Robô ATR Erro]:", e.message);
+        console.error("[Robô EMA Erro]:", e.message);
     }
 }
 
 setInterval(executarMotorNuvem, 30000);
 
 app.listen(PORT, () => {
-    console.log(`Servidor com Motor ATR Autónomo rodando na porta ${PORT}`);
+    console.log(`Servidor com Filtro de Tendência EMA rodando na porta ${PORT}`);
 });
