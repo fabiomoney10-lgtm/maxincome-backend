@@ -25,13 +25,15 @@ function gerarAssinaturaHMAC(secret, message) {
     return crypto.createHmac('sha256', secret).update(message).digest('hex');
 }
 
-let ultimoPrecoCompra = 1.3115;
-let precoMaximoAtingido = 0; // Variável de rastreio para o Trailing Stop
+// Lista de Ativos em Operação (Multi-Ativos)
+const ATIVOS = ["XRPUSDT", "SOLUSDT", "ETHUSDT"];
+let precosCompra = { "XRPUSDT": 1.3115, "SOLUSDT": 120.0, "ETHUSDT": 2500.0 };
+let precosMaximos = { "XRPUSDT": 0, "SOLUSDT": 0, "ETHUSDT": 0 };
 
-// 1. Cálculo do ATR (Volatilidade Dinâmica)
-async function calcularFatorVolatilidade() {
+// 1. Cálculo de Volatilidade (ATR) por ativo
+async function calcularFatorVolatilidade(symbol) {
     try {
-        const res = await fetch('https://api.binance.com/api/v3/klines?symbol=XRPUSDT&interval=15m&limit=10');
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=10`);
         const klines = await res.json();
         if (!Array.isArray(klines) || klines.length === 0) return 0.008;
 
@@ -54,10 +56,10 @@ async function calcularFatorVolatilidade() {
     }
 }
 
-// 2. Filtro de Tendência (EMA 20)
-async function verificarTendenciaAlta() {
+// 2. Filtro de Tendência (EMA 20) por ativo
+async function verificarTendenciaAlta(symbol) {
     try {
-        const res = await fetch('https://api.binance.com/api/v3/klines?symbol=XRPUSDT&interval=15m&limit=25');
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=25`);
         const klines = await res.json();
         if (!Array.isArray(klines) || klines.length < 20) return true;
 
@@ -80,21 +82,17 @@ async function executarMotorNuvem() {
     const secretKey = process.env.BYBIT_SECRET_KEY;
 
     if (!apiKey || !secretKey) {
-        console.log("[Robô Nuvem Trailing] Chaves API não configuradas.");
+        console.log("[Robô Multi-Ativos] Chaves API não configuradas.");
         return;
     }
 
     try {
-        const priceRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT');
-        const priceData = await priceRes.json();
-        if (!priceData || !priceData.price) return;
-        const precoAtual = parseFloat(priceData.price);
-
         const timeRes = await fetch('https://api.binance.com/api/v3/time');
         const timeData = await timeRes.json();
         const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
         const recvWindow = '60000';
 
+        // Consultar saldos unificados na Bybit
         const queryString = "accountType=UNIFIED";
         const signatureSaldo = gerarAssinaturaHMAC(secretKey, serverTimestamp + apiKey + recvWindow + queryString);
 
@@ -110,42 +108,91 @@ async function executarMotorNuvem() {
         const saldoData = await saldoRes.json();
 
         let usdtDisponivel = 0;
-        let xrpDisponivel = 0;
+        let saldosMoedas = {};
 
         if (saldoData.retCode === 0 && saldoData.result.list[0]) {
             const moedas = saldoData.result.list[0].coin;
             for (let m of moedas) {
                 if (m.coin === "USDT") usdtDisponivel = parseFloat(m.walletBalance || 0);
-                if (m.coin === "XRP") xrpDisponivel = parseFloat(m.walletBalance || 0);
+                saldosMoedas[m.coin] = parseFloat(m.walletBalance || 0);
             }
         }
 
-        const percentualLucroDinamico = await calcularFatorVolatilidade();
-        const tendenciaFavoravel = await verificarTendenciaAlta();
+        // Loop por cada ativo do portfólio
+        for (let symbol of ATIVOS) {
+            const moedaBase = symbol.replace("USDT", "");
+            
+            const priceRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+            const priceData = await priceRes.json();
+            if (!priceData || !priceData.price) continue;
+            const precoAtual = parseFloat(priceData.price);
 
-        console.log(`[Robô Trailing] XRP: $${precoAtual} | USDT: ${usdtDisponivel.toFixed(2)} | XRP: ${xrpDisponivel.toFixed(2)}`);
+            const qtdAtivo = saldosMoedas[moedaBase] || 0;
+            const percentualLucroDinamico = await calcularFatorVolatilidade(symbol);
+            const tendenciaFavoravel = await verificarTendenciaAlta(symbol);
 
-        if (xrpDisponivel >= 1.5) {
-            const alvoInicialLucro = ultimoPrecoCompra * (1 + percentualLucroDinamico);
+            console.log(`[Multi-Ativos] ${symbol} | Preço: $${precoAtual} | Saldo: ${qtdAtivo} | USDT: ${usdtDisponivel.toFixed(2)}`);
 
-            // Atualiza o topo máximo atingido caso o preço suba
-            if (precoAtual > precoMaximoAtingido) {
-                precoMaximoAtingido = precoAtual;
-            }
+            // Lógica de Venda (Trailing Stop + ATR)
+            const limiteMinimoVenda = (symbol === "ETHUSDT") ? 0.005 : (symbol === "SOLUSDT") ? 0.02 : 1.5;
+            if (qtdAtivo >= limiteMinimoVenda) {
+                const baseCompra = precosCompra[symbol] || precoAtual;
+                const alvoInicialLucro = baseCompra * (1 + percentualLucroDinamico);
 
-            // Define o gatilho do Trailing Stop (permite recuo máximo de 0.4% a partir do topo máximo)
-            const gatilhoTrailing = precoMaximoAtingido * 0.996;
+                if (precoAtual > (precosMaximos[symbol] || 0)) {
+                    precosMaximos[symbol] = precoAtual;
+                }
 
-            // Condição de Venda: Atingiu o alvo inicial E o preço começou a recuar do topo (ou ultrapassou o alvo com força)
-            if (precoAtual >= alvoInicialLucro && precoAtual <= gatilhoTrailing) {
-                console.log(`[Robô Trailing] Topo máximo: $${precoMaximoAtingido} | Recuo detetado. A executar VENDA com lucro máximo...`);
+                const gatilhoTrailing = precosMaximos[symbol] * 0.996;
+
+                if (precoAtual >= alvoInicialLucro && precoAtual <= gatilhoTrailing) {
+                    console.log(`[Multi-Ativos] ${symbol} atingiu alvo de lucro com Trailing Stop. A vender...`);
+
+                    const bodyData = {
+                        category: "spot",
+                        symbol: symbol,
+                        side: "Sell",
+                        orderType: "Market",
+                        qty: (symbol === "ETHUSDT" || symbol === "SOLUSDT") ? qtdAtivo.toFixed(3) : Math.floor(qtdAtivo).toString()
+                    };
+
+                    const jsonBody = JSON.stringify(bodyData);
+                    const sigOrder = gerarAssinaturaHMAC(secretKey, serverTimestamp + apiKey + recvWindow + jsonBody);
+
+                    const resp = await fetch('https://api.bybit.com/v5/order/create', {
+                        method: 'POST',
+                        headers: {
+                            'X-BAPI-API-KEY': apiKey,
+                            'X-BAPI-SIGN': sigOrder,
+                            'X-BAPI-TIMESTAMP': serverTimestamp,
+                            'X-BAPI-RECV-WINDOW': recvWindow,
+                            'Content-Type': 'application/json'
+                        },
+                        body: jsonBody
+                    });
+                    const resJson = await resp.json();
+                    if (resJson.retCode === 0) {
+                        precosMaximos[symbol] = 0;
+                    }
+                }
+            } 
+            // Lógica de Compra (Juros Compostos + EMA)
+            else if (usdtDisponivel >= 3.0 && tendenciaFavoravel) {
+                const capitalAlocadoUSDT = usdtDisponivel * 0.25; // 25% do USDT disponível por ativo
+                let qtdComprar = capitalAlocadoUSDT / precoAtual;
+
+                if (symbol === "XRPUSDT" && qtdComprar < 1) qtdComprar = 1;
+                if (symbol === "SOLUSDT" && qtdComprar < 0.05) qtdComprar = 0.05;
+                if (symbol === "ETHUSDT" && qtdComprar < 0.001) qtdComprar = 0.001;
+
+                console.log(`[Multi-Ativos] A executar compra de ${symbol}...`);
 
                 const bodyData = {
                     category: "spot",
-                    symbol: "XRPUSDT",
-                    side: "Sell",
+                    symbol: symbol,
+                    side: "Buy",
                     orderType: "Market",
-                    qty: Math.floor(xrpDisponivel).toString()
+                    qty: (symbol === "ETHUSDT") ? qtdComprar.toFixed(4) : (symbol === "SOLUSDT") ? qtdComprar.toFixed(3) : Math.floor(qtdComprar).toString()
                 };
 
                 const jsonBody = JSON.stringify(bodyData);
@@ -163,57 +210,21 @@ async function executarMotorNuvem() {
                     body: jsonBody
                 });
                 const resJson = await resp.json();
-                
                 if (resJson.retCode === 0) {
-                    precoMaximoAtingido = 0; // Reseta para o próximo ciclo
+                    precosCompra[symbol] = precoAtual;
+                    precosMaximos[symbol] = precoAtual;
+                    break; // Executa uma compra por ciclo para preservar caixa
                 }
-                console.log(`[Robô Trailing] Resposta Venda:`, resJson.retMsg);
             }
-        } else if (usdtDisponivel >= 1.0 && tendenciaFavoravel) {
-            // Juros Compostos (35% do capital disponível)
-            const capitalAlocadoUSDT = usdtDisponivel * 0.35;
-            let quantidadeParaComprar = Math.floor(capitalAlocadoUSDT / precoAtual);
-            if (quantidadeParaComprar < 1) quantidadeParaComprar = 1;
-
-            console.log(`[Robô Trailing] A executar compra com juros compostos: ${quantidadeParaComprar} XRP...`);
-
-            const bodyData = {
-                category: "spot",
-                symbol: "XRPUSDT",
-                side: "Buy",
-                orderType: "Market",
-                qty: quantidadeParaComprar.toString()
-            };
-
-            const jsonBody = JSON.stringify(bodyData);
-            const sigOrder = gerarAssinaturaHMAC(secretKey, serverTimestamp + apiKey + recvWindow + jsonBody);
-
-            const resp = await fetch('https://api.bybit.com/v5/order/create', {
-                method: 'POST',
-                headers: {
-                    'X-BAPI-API-KEY': apiKey,
-                    'X-BAPI-SIGN': sigOrder,
-                    'X-BAPI-TIMESTAMP': serverTimestamp,
-                    'X-BAPI-RECV-WINDOW': recvWindow,
-                    'Content-Type': 'application/json'
-                },
-                body: jsonBody
-            });
-            const resJson = await resp.json();
-            if (resJson.retCode === 0) {
-                ultimoPrecoCompra = precoAtual;
-                precoMaximoAtingido = precoAtual; // Inicializa o rastreio do topo
-            }
-            console.log(`[Robô Trailing] Resposta Compra:`, resJson.retMsg);
         }
 
     } catch (e) {
-        console.error("[Robô Trailing Erro]:", e.message);
+        console.error("[Robô Multi-Ativos Erro]:", e.message);
     }
 }
 
-setInterval(executarMotorNuvem, 30000);
+setInterval(executarMotorNuvem, 35000);
 
 app.listen(PORT, () => {
-    console.log(`Servidor com Trailing Stop Autónomo rodando na porta ${PORT}`);
+    console.log(`Servidor Multi-Ativos Autónomo rodando na porta ${PORT}`);
 });
