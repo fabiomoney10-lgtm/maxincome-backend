@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Rota para o frontend obter as chaves (se necessário)
+// Rota para fornecer chaves (caso o painel precise)
 app.get('/get-keys', (req, res) => {
     res.json({
         apiKey: process.env.BYBIT_API_KEY || '',
@@ -22,22 +22,24 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// --- MOTOR DE TRADING AUTÓNOMO NO BACKEND (Roda 24/7 na nuvem) ---
+// --- MOTOR DE TRADING AUTÓNOMO NO BACKEND (Roda na nuvem 24/7) ---
 function gerarAssinaturaHMAC(secret, message) {
     return crypto.createHmac('sha256', secret).update(message).digest('hex');
 }
+
+let ultimoPrecoCompra = 1.3115; // Preço base de referência
 
 async function executarMotorNuvem() {
     const apiKey = process.env.BYBIT_API_KEY;
     const secretKey = process.env.BYBIT_SECRET_KEY;
 
     if (!apiKey || !secretKey) {
-        console.log("[Robô Nuvem] Chaves API não configuradas no servidor.");
+        console.log("[Robô Nuvem] Chaves API não configuradas nas variáveis de ambiente do Render.");
         return;
     }
 
     try {
-        // 1. Obter preço atual do XRP via Binance Public API
+        // 1. Obter preço atual do XRP
         const priceRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT');
         const priceData = await priceRes.json();
         if (!priceData || !priceData.price) return;
@@ -49,7 +51,7 @@ async function executarMotorNuvem() {
         const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
         const recvWindow = '60000';
 
-        // 3. Consultar saldos na Bybit
+        // 3. Consultar saldos reais na Bybit
         const queryString = "accountType=UNIFIED";
         const signatureSaldo = gerarAssinaturaHMAC(secretKey, serverTimestamp + apiKey + recvWindow + queryString);
 
@@ -75,16 +77,42 @@ async function executarMotorNuvem() {
             }
         }
 
-        console.log(`[Robô Nuvem] Preço XRP: $${precoAtual} | USDT: ${usdtDisponivel.toFixed(2)} | XRP: ${xrpDisponivel.toFixed(2)}`);
+        console.log(`[Robô Nuvem] XRP: $${precoAtual} | USDT: ${usdtDisponivel.toFixed(2)} | XRP Disp: ${xrpDisponivel.toFixed(2)}`);
 
-        // 4. Lógica de Execução (Vender se tiver XRP, Comprar se tiver USDT)
+        // 4. Ciclo da Roda Gigante autónomo
         if (xrpDisponivel >= 1.5) {
-            // Preço alvo de venda fictício/dinâmico (+0.8%) - aqui assumimos alta baseada na última compra estimada
-            console.log(`[Robô Nuvem] Monitorizando XRP para venda...`);
-            // Se quiser forçar venda automática quando atingir alvo, pode aplicar aqui
+            const alvoLucro = ultimoPrecoCompra * 1.008; // Alvo +0.8%
+            if (precoAtual >= alvoLucro) {
+                console.log(`[Robô Nuvem] Alvo atingido ($${precoAtual} >= $${alvoLucro}). A enviar ordem de VENDA...`);
+
+                const bodyData = {
+                    category: "spot",
+                    symbol: "XRPUSDT",
+                    side: "Sell",
+                    orderType: "Market",
+                    qty: Math.floor(xrpDisponivel).toString()
+                };
+
+                const jsonBody = JSON.stringify(bodyData);
+                const sigOrder = gerarAssinaturaHMAC(secretKey, serverTimestamp + apiKey + recvWindow + jsonBody);
+
+                const resp = await fetch('https://api.bybit.com/v5/order/create', {
+                    method: 'POST',
+                    headers: {
+                        'X-BAPI-API-KEY': apiKey,
+                        'X-BAPI-SIGN': sigOrder,
+                        'X-BAPI-TIMESTAMP': serverTimestamp,
+                        'X-BAPI-RECV-WINDOW': recvWindow,
+                        'Content-Type': 'application/json'
+                    },
+                    body: jsonBody
+                });
+                const resJson = await resp.json();
+                console.log(`[Robô Nuvem] Resposta Venda:`, resJson.retMsg);
+            }
         } else if (usdtDisponivel >= 1.0) {
-            console.log(`[Robô Nuvem] Saldo USDT disponível detetado. A preparar compra na baixa...`);
-            
+            console.log(`[Robô Nuvem] Saldo USDT disponível. A enviar ordem de COMPRA...`);
+
             const bodyData = {
                 category: "spot",
                 symbol: "XRPUSDT",
@@ -94,21 +122,24 @@ async function executarMotorNuvem() {
             };
 
             const jsonBody = JSON.stringify(bodyData);
-            const signatureOrder = gerarAssinaturaHMAC(secretKey, serverTimestamp + apiKey + recvWindow + jsonBody);
+            const sigOrder = gerarAssinaturaHMAC(secretKey, serverTimestamp + apiKey + recvWindow + jsonBody);
 
-            const orderResp = await fetch('https://api.bybit.com/v5/order/create', {
+            const resp = await fetch('https://api.bybit.com/v5/order/create', {
                 method: 'POST',
-                headers: {
+                    headers: {
                     'X-BAPI-API-KEY': apiKey,
-                    'X-BAPI-SIGN': signatureOrder,
+                    'X-BAPI-SIGN': sigOrder,
                     'X-BAPI-TIMESTAMP': serverTimestamp,
                     'X-BAPI-RECV-WINDOW': recvWindow,
                     'Content-Type': 'application/json'
                 },
                 body: jsonBody
             });
-            const orderResult = await orderResp.json();
-            console.log(`[Robô Nuvem] Resposta da Ordem de Compra:`, orderResult.retMsg);
+            const resJson = await resp.json();
+            if (resJson.retCode === 0) {
+                ultimoPrecoCompra = precoAtual;
+            }
+            console.log(`[Robô Nuvem] Resposta Compra:`, resJson.retMsg);
         }
 
     } catch (e) {
@@ -116,7 +147,7 @@ async function executarMotorNuvem() {
     }
 }
 
-// O robô executa sozinho a cada 30 segundos na nuvem 24/7, mesmo sem ninguém no site!
+// O motor executa sozinho na nuvem a cada 30 segundos, sem precisar do navegador aberto!
 setInterval(executarMotorNuvem, 30000);
 
 app.listen(PORT, () => {
