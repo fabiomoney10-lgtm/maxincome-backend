@@ -26,6 +26,7 @@ function gerarAssinaturaHMAC(secret, message) {
 }
 
 let ultimoPrecoCompra = 1.3115;
+let precoMaximoAtingido = 0; // Variável de rastreio para o Trailing Stop
 
 // 1. Cálculo do ATR (Volatilidade Dinâmica)
 async function calcularFatorVolatilidade() {
@@ -79,7 +80,7 @@ async function executarMotorNuvem() {
     const secretKey = process.env.BYBIT_SECRET_KEY;
 
     if (!apiKey || !secretKey) {
-        console.log("[Robô Nuvem Juros Compostos] Chaves API não configuradas.");
+        console.log("[Robô Nuvem Trailing] Chaves API não configuradas.");
         return;
     }
 
@@ -122,12 +123,22 @@ async function executarMotorNuvem() {
         const percentualLucroDinamico = await calcularFatorVolatilidade();
         const tendenciaFavoravel = await verificarTendenciaAlta();
 
-        console.log(`[Robô Juros Compostos] XRP: $${precoAtual} | USDT: ${usdtDisponivel.toFixed(2)} | XRP: ${xrpDisponivel.toFixed(2)}`);
+        console.log(`[Robô Trailing] XRP: $${precoAtual} | USDT: ${usdtDisponivel.toFixed(2)} | XRP: ${xrpDisponivel.toFixed(2)}`);
 
         if (xrpDisponivel >= 1.5) {
-            const alvoLucro = ultimoPrecoCompra * (1 + percentualLucroDinamico);
-            if (precoAtual >= alvoLucro) {
-                console.log(`[Robô Compostos] Alvo atingido ($${precoAtual} >= $${alvoLucro.toFixed(4)}). A vender...`);
+            const alvoInicialLucro = ultimoPrecoCompra * (1 + percentualLucroDinamico);
+
+            // Atualiza o topo máximo atingido caso o preço suba
+            if (precoAtual > precoMaximoAtingido) {
+                precoMaximoAtingido = precoAtual;
+            }
+
+            // Define o gatilho do Trailing Stop (permite recuo máximo de 0.4% a partir do topo máximo)
+            const gatilhoTrailing = precoMaximoAtingido * 0.996;
+
+            // Condição de Venda: Atingiu o alvo inicial E o preço começou a recuar do topo (ou ultrapassou o alvo com força)
+            if (precoAtual >= alvoInicialLucro && precoAtual <= gatilhoTrailing) {
+                console.log(`[Robô Trailing] Topo máximo: $${precoMaximoAtingido} | Recuo detetado. A executar VENDA com lucro máximo...`);
 
                 const bodyData = {
                     category: "spot",
@@ -152,15 +163,19 @@ async function executarMotorNuvem() {
                     body: jsonBody
                 });
                 const resJson = await resp.json();
-                console.log(`[Robô Compostos] Resposta Venda:`, resJson.retMsg);
+                
+                if (resJson.retCode === 0) {
+                    precoMaximoAtingido = 0; // Reseta para o próximo ciclo
+                }
+                console.log(`[Robô Trailing] Resposta Venda:`, resJson.retMsg);
             }
         } else if (usdtDisponivel >= 1.0 && tendenciaFavoravel) {
-            // 3. Juros Compostos Geométricos: Usa 35% do saldo USDT total disponível para a compra
+            // Juros Compostos (35% do capital disponível)
             const capitalAlocadoUSDT = usdtDisponivel * 0.35;
             let quantidadeParaComprar = Math.floor(capitalAlocadoUSDT / precoAtual);
-            if (quantidadeParaComprar < 1) quantidadeParaComprar = 1; // Garante o mínimo exigido pela corretora
+            if (quantidadeParaComprar < 1) quantidadeParaComprar = 1;
 
-            console.log(`[Robô Compostos] Capital reinvestido: $${capitalAlocadoUSDT.toFixed(2)} USDT -> A comprar ${quantidadeParaComprar} XRP...`);
+            console.log(`[Robô Trailing] A executar compra com juros compostos: ${quantidadeParaComprar} XRP...`);
 
             const bodyData = {
                 category: "spot",
@@ -187,17 +202,18 @@ async function executarMotorNuvem() {
             const resJson = await resp.json();
             if (resJson.retCode === 0) {
                 ultimoPrecoCompra = precoAtual;
+                precoMaximoAtingido = precoAtual; // Inicializa o rastreio do topo
             }
-            console.log(`[Robô Compostos] Resposta Compra:`, resJson.retMsg);
+            console.log(`[Robô Trailing] Resposta Compra:`, resJson.retMsg);
         }
 
     } catch (e) {
-        console.error("[Robô Compostos Erro]:", e.message);
+        console.error("[Robô Trailing Erro]:", e.message);
     }
 }
 
 setInterval(executarMotorNuvem, 30000);
 
 app.listen(PORT, () => {
-    console.log(`Servidor com Juros Compostos Autónomo rodando na porta ${PORT}`);
+    console.log(`Servidor com Trailing Stop Autónomo rodando na porta ${PORT}`);
 });
