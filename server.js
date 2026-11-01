@@ -1,82 +1,85 @@
 // =============================================================
-// MaxIncome - Nuvem Autônoma 24/7 (Versão Híbrida: Venda + Nova Compra)
+// MaxIncome - Nuvem Autónoma 24/7 (Versão Híbrida Corrigida)
 // =============================================================
 
 const CONFIG = {
-  // Ativo principal que está sendo monitorado para venda das sobras
   SYMBOL_ANTIGO: 'XRPUSDT',
-  
-  // Novo ativo dinâmico para novas compras com o saldo livre em USDT (ex: SOLUSDT ou BTCUSDT)
-  SYMBOL_NOVO: 'SOLUSDT', 
-  
-  // Percentual do saldo livre em USDT a utilizar na nova compra
-  ORDER_USAGE_PERCENT: 0.50, // Utiliza 50% do USDT disponível
-  
-  // Percentual de Lucro Alvo para disparo automático de Venda
-  TARGET_PROFIT_PERCENT: 0.02, // 2% de lucro
-  
-  CHECK_INTERVAL_MS: 15000 // A cada 15 segundos
+  ALVO_VENDA_XRP: 1.3220, // Teu alvo fixado para o XRP
+  SYMBOL_NOVO: 'SOLUSDT',   // Novo ativo para novas compras
+  PERCENTUAL_COMPRA_USDT: 0.50, // Usa 50% do saldo livre por entrada
+  MARGEM_LUCRO_NOVO: 0.02,     // 2% de lucro alvo
+  INTERVALO_MS: 15000          // A cada 15 segundos
 };
 
-/**
- * Função Principal de Ciclo Híbrido (Mantém a venda anterior + Adiciona novas compras)
- */
-async function rodarCicloHibrido() {
-  console.log(`[${new Date().toLocaleTimeString()}] 🚀 Robô MaxIncome em Execução Híbrida Ativa!`);
+// =========================================================
+// Funções de Conexão com a Bybit (Definição dos Métodos)
+// =========================================================
+
+async function buscarSaldoBybit() {
+  // Substitui por chamada real à API da Bybit ou ao teu módulo de cliente Bybit
+  // Exemplo de retorno simulado/estruturado para o teu saldo atual:
+  return {
+    USDT: 43.87,
+    XRP: 1.57,
+    NOVO_ATIVO_QTD: 0,
+    PRECO_MEDIO_NOVO: 0
+  };
+}
+
+async function buscarPrecoAtual(simbolo) {
+  // Insere aqui a tua lógica para buscar o preço atual na API da Bybit
+  // Exemplo estático ou via fetch/axios:
+  return 1.2501; 
+}
+
+async function executarOrdemBybit(tipo, simbolo, quantidade) {
+  console.log(`[API BYBIT] A executar ${tipo} para ${quantidade} de ${simbolo}...`);
+  // Insere aqui a tua função de envio de ordem para a Bybit
+  return { sucesso: true };
+}
+
+// =========================================================
+// Ciclo Principal Híbrido
+// =========================================================
+
+async function iniciarCicloHibrido() {
+  console.log(`[${new Date().toLocaleTimeString()}] 🚀 Sistema MaxIncome Híbrido Iniciado!`);
   
   setInterval(async () => {
     try {
-      // 1. Obter Saldo e Cotações
       const saldo = await buscarSaldoBybit(); 
-      const precoAtualAntigo = await buscarPrecoAtual(CONFIG.SYMBOL_ANTIGO);
-      const precoAtualNovo = await buscarPrecoAtual(CONFIG.SYMBOL_NOVO);
+      const precoXRP = await buscarPrecoAtual(CONFIG.SYMBOL_ANTIGO);
+      const precoNovo = await buscarPrecoAtual(CONFIG.SYMBOL_NOVO);
 
-      // ==========================================
-      // FUNÇÃO 1: Continuar procurando venda do ativo antigo (XRP)
-      // ==========================================
+      console.log(`\n--- [CHECK ${new Date().toLocaleTimeString()}] ---`);
+      console.log(`USDT Livre: $${saldo.USDT.toFixed(2)} | XRP em Custódia: ${saldo.XRP}`);
+
+      // 1. Monitorizar e Vender as sobras de XRP no Alvo ($1.3220)
       if (saldo.XRP > 0) {
-        const precoAlvoVendaAntigo = saldo.PRECO_MEDIO_XRP * (1 + CONFIG.TARGET_PROFIT_PERCENT);
-        console.log(`🔍 [XRP] Monitorando venda: Alvo $${precoAlvoVendaAntigo.toFixed(4)} | Atual: $${precoAtualAntigo.toFixed(4)}`);
-
-        if (precoAtualAntigo >= precoAlvoVendaAntigo) {
-          console.log(`🚀 Alvo atingido para XRP! Executando VENDA...`);
+        console.log(`🔍 [XRP] Preço Atual: $${precoXRP.toFixed(4)} | Alvo de Venda: $${CONFIG.ALVO_VENDA_XRP}`);
+        if (precoXRP >= CONFIG.ALVO_VENDA_XRP) {
+          console.log(`🚀 [XRP] Alvo atingido! Disparando ORDEM DE VENDA para ${saldo.XRP} XRP...`);
           await executarOrdemBybit('SELL', CONFIG.SYMBOL_ANTIGO, saldo.XRP);
         }
       }
 
-      // ==========================================
-      // FUNÇÃO 2 (NOVA): Usar USDT livre para comprar o novo ativo de maior valorização
-      // ==========================================
+      // 2. Usar o saldo em USDT livre para comprar o novo ativo (ex: SOL)
       if (saldo.USDT >= 10 && saldo.NOVO_ATIVO_QTD === 0) {
-        const valorParaComprar = saldo.USDT * CONFIG.ORDER_USAGE_PERCENT;
-        const qtdParaComprar = (valorParaComprar / precoAtualNovo).toFixed(3);
+        const valorEmUSDT = saldo.USDT * CONFIG.PERCENTUAL_COMPRA_USDT;
+        const qtdComprar = (valorEmUSDT / precoNovo).toFixed(3);
 
-        console.log(`🎯 [NOVA FUNÇÃO] Usando USDT livre para comprar ${CONFIG.SYMBOL_NOVO}...`);
-        const ordemNova = await executarOrdemBybit('BUY', CONFIG.SYMBOL_NOVO, qtdParaComprar);
+        console.log(`🎯 [${CONFIG.SYMBOL_NOVO}] Disparando ORDEM DE COMPRA de ${qtdComprar} unidades...`);
+        const ordemCompra = await executarOrdemBybit('BUY', CONFIG.SYMBOL_NOVO, qtdComprar);
 
-        if (ordemNova.sucesso) {
-          console.log(`✅ Nova compra executada em ${CONFIG.SYMBOL_NOVO} com sucesso!`);
+        if (ordemCompra.sucesso) {
+          console.log(`✅ Compra de ${CONFIG.SYMBOL_NOVO} realizada com sucesso!`);
         }
       }
 
-      // ==========================================
-      // FUNÇÃO 3 (NOVA): Monitorar e vender o novo ativo quando atingir o lucro
-      // ==========================================
-      if (saldo.NOVO_ATIVO_QTD > 0) {
-        const precoAlvoNovo = saldo.PRECO_MEDIO_NOVO * (1 + CONFIG.TARGET_PROFIT_PERCENT);
-        console.log(`🔍 [${CONFIG.SYMBOL_NOVO}] Monitorando alvo: $${precoAlvoNovo.toFixed(4)} | Atual: $${precoAtualNovo.toFixed(4)}`);
-
-        if (precoAtualNovo >= precoAlvoNovo) {
-          console.log(`🚀 Alvo atingido em ${CONFIG.SYMBOL_NOVO}! Executando VENDA e voltando para USDT...`);
-          await executarOrdemBybit('SELL', CONFIG.SYMBOL_NOVO, saldo.NOVO_ATIVO_QTD);
-        }
-      }
-
-    } catch (error) {
-      console.error("❌ Erro no ciclo híbrido:", error.message);
+    } catch (erro) {
+      console.error("❌ Erro no ciclo híbrido:", erro.message);
     }
-  }, CONFIG.CHECK_INTERVAL_MS);
+  }, CONFIG.INTERVALO_MS);
 }
 
-// Iniciar sistema
-rodarCicloHibrido();
+iniciarCicloHibrido();
