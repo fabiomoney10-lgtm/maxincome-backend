@@ -31,7 +31,7 @@ function enviarMensagemTelegram(texto) {
         let resposta = '';
         res.on('data', (chunk) => { resposta += chunk; });
         res.on('end', () => {
-            console.log("Mensagem enviada para o Telegram com sucesso.");
+            console.log("Alerta de ordem executada enviado para o Telegram com sucesso.");
         });
     });
 
@@ -43,56 +43,27 @@ function enviarMensagemTelegram(texto) {
     req.end();
 }
 
-// --- ROTA DE WEBHOOK ---
+// --- ROTA DE WEBHOOK (DISPARA APENAS QUANDO HÁ ORDEM REAL EXECUTADA) ---
 app.post('/webhook', (req, res) => {
     const dados = req.body;
-    console.log("Webhook recebido:", dados);
+    console.log("Ordem executada recebida via webhook:", dados);
 
-    const textoMensagem = `🚨 *Sinal Recebido (Webhook)*\n\n` +
-                          `• *Ação:* ${dados.acao || 'N/A'}\n` +
+    // Formata a mensagem estritamente para ordens de Compra ou Venda executadas
+    const textoMensagem = `🟢 *ORDEM EXECUTADA NA CORRETORA*\n\n` +
+                          `• *Ação:* ${dados.acao || 'EXECUTADO'}\n` +
                           `• *Par:* ${dados.par || 'XRP/USDT'}\n` +
                           `• *Preço:* ${dados.preco || 'N/A'}\n` +
                           `• *Horário:* ${dados.horario || 'N/A'}`;
 
     enviarMensagemTelegram(textoMensagem);
-    res.status(200).json({ status: "sucesso", mensagem: "Alerta enviado para o Telegram!" });
+    res.status(200).json({ status: "sucesso", mensagem: "Notificação de ordem enviada!" });
 });
 
 app.get('/', (req, res) => {
-    res.send('MaxIncome Backend a funcionar 24/7 na nuvem!');
+    res.send('MaxIncome Backend de Ordens Reais a funcionar 24/7 na nuvem!');
 });
 
-// --- MOTOR DE MONITORIZAÇÃO AUTÓNOMA 24/7 ---
-const ATIVOS_MONITORADOS = ['XRP/USDT'];
-
-function iniciarMonitorizacaoNuvem() {
-    console.log("Motor de monitorização autónoma 24/7 iniciado na nuvem.");
-    
-    setInterval(() => {
-        try {
-            const agora = new Date();
-            const minutos = agora.getMinutes();
-            const segundos = agora.getSeconds();
-
-            if (minutos % 5 === 0 && segundos <= 10) {
-                console.log(`[Cloud Bot] Janela de análise atingida em ${agora.toLocaleTimeString()}`);
-                
-                ATIVOS_MONITORADOS.forEach((par) => {
-                    const mensagemAutonoma = `🤖 *Alerta Automático (24/7)*\n\n` +
-                                             `• *Ativo:* ${par}\n` +
-                                             `• *Ciclo:* Vela de 5M fechada\n` +
-                                             `• *Status:* Sistema a operar na nuvem!`;
-                    
-                    enviarMensagemTelegram(mensagemAutonoma);
-                });
-            }
-        } catch (err) {
-            console.error("Erro no ciclo de monitorização:", err);
-        }
-    }, 10000);
-}
-
-// Tratamento de erros globais para evitar fecho inesperado
+// Tratamento de erros globais
 process.on('uncaughtException', (err) => {
     console.error('Erro não capturado:', err);
 });
@@ -101,8 +72,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 const PORT = process.env.PORT || 10000;
-// É obrigatório ligar a '0.0.0.0' no Render para aceitar conexões externas
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor a rodar na porta ${PORT}`);
-    iniciarMonitorizacaoNuvem();
+    console.log(`Servidor de execução a rodar na porta ${PORT}`);
+    console.log("A aguardar ordens reais da corretora via webhook...");
 });
