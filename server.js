@@ -9,18 +9,17 @@ app.use(express.json());
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '9179415153:AAGUvi8GmakFwjrxT_3BM2IoqqYkIssGTag';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1633419568';
 
+// Insira as suas chaves reais da Bybit aqui ou nas variáveis de ambiente do Render
 const BYBIT_API_KEY = process.env.BYBIT_API_KEY || 'SUA_API_KEY_AQUI';
 const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || 'SUA_SECRET_KEY_AQUI';
 const BYBIT_HOST = 'api.bybit.com';
 const PAR_ATIVO = 'XRPUSDT';
 
-let estadoAtual = {
-    ativo: "XRP (XRP/USDT)",
-    statusRobo: "Robô em Ciclo Perpétuo Ativo",
-    saldoUsdt: "7.00",
-    saldoXrp: "1.57",
-    cotacaoAtual: "1.2916",
-    ultimoLog: "[11:04:14] 🔍 Tem 1.57 XRP. Alvo de Venda: $1.3220 (Atual: $1.2916)"
+let dadosPainel = {
+    saldoUsdt: "A carregar...",
+    saldoXrp: "A carregar...",
+    cotacaoAtual: "0.0000",
+    ultimoLog: "[Sistema] A ligar à API da Bybit..."
 };
 
 function enviarMensagemTelegram(texto) {
@@ -46,17 +45,89 @@ function enviarMensagemTelegram(texto) {
         let resposta = '';
         res.on('data', (chunk) => { resposta += chunk; });
         res.on('end', () => {
-            console.log("Notificação enviada para o Telegram.");
+            console.log("Alerta enviado para o Telegram.");
         });
     });
 
     req.on('error', (e) => {
-        console.error(`Erro ao enviar telegram: ${e.message}`);
+        console.error(`Erro ao enviar telegram: ${e.message}`); });  req.write(dados); req.end(); }  // --- FUNÇÃO PARA BUSCAR SALDOS REAIS NA BYBIT --- function consultarSaldoBybit() { const timestamp = Date.now().toString(); const queryString = "accountType=SPOT"; const signaturePayload = timestamp + BYBIT_API_KEY + '5000' + queryString; const signature = crypto.createHmac('sha256', BYBIT_SECRET_KEY).update(signaturePayload).digest('hex');  const options = { hostname: BYBIT_HOST, path: `/v5/account/wallet-balance?${queryString}`,
+        method: 'GET',
+        headers: {
+            'X-BAPI-API-KEY': BYBIT_API_KEY,
+            'X-BAPI-TIMESTAMP': timestamp,
+            'X-BAPI-SIGN': signature,
+            'X-BAPI-RECV-WINDOW': '5000'
+        }
+    };
+
+    const req = https.request(options, (res) => {
+        let resposta = '';
+        res.on('data', (chunk) => { resposta += chunk; });
+        res.on('end', () => {
+            try {
+                const resJson = JSON.parse(resposta);
+                if (resJson.retCode === 0 && resJson.result && resJson.result.list) {
+                    const moedas = resJson.result.list[0].coin;
+                    let usdt = "0.00";
+                    let xrp = "0.00";
+                    
+                    moedas.forEach(m => {
+                        if (m.coin === 'USDT') usdt = parseFloat(m.walletBalance).toFixed(2);
+                        if (m.coin === 'XRP') xrp = parseFloat(m.walletBalance).toFixed(2);
+                    });
+
+                    dadosPainel.saldoUsdt = usdt;
+                    dadosPainel.saldoXrp = xrp;
+                }
+            } catch (e) {
+                console.error("Erro ao interpretar saldo da Bybit:", e);
+            }
+        });
     });
 
-    req.write(dados);
+    req.on('error', (e) => {
+        console.error(`Erro ao consultar saldo: ${e.message}`); });  req.end(); }  // --- FUNÇÃO PARA BUSCAR COTAÇÃO REAL DA XRP --- function consultarCotacaoBybit() { const options = { hostname: BYBIT_HOST, path: `/v5/market/tickers?category=spot&symbol=${PAR_ATIVO}`,
+        method: 'GET'
+    };
+
+    const req = https.request(options, (res) => {
+        let resposta = '';
+        res.on('data', (chunk) => { resposta += chunk; });
+        res.on('end', () => {
+            try {
+                const resJson = JSON.parse(resposta);
+                if (resJson.retCode === 0 && resJson.result && resJson.result.list) {
+                    dadosPainel.cotacaoAtual = parseFloat(resJson.result.list[0].lastPrice).toFixed(4);
+                }
+            } catch (e) {
+                console.error("Erro ao consultar cotação:", e);
+            }
+        });
+    });
+
+    req.on('error', (e) => {
+        console.error(`Erro ao consultar cotação: ${e.message}`); });  req.end(); }  // --- EXECUTAR ORDENS REAIS NA BYBIT --- function executarOrdemReal(lado, precoReferencia) { const timestamp = Date.now().toString(); const endpoint = '/v5/order/create';  const bodyObj = { category: "spot", symbol: PAR_ATIVO, side: lado, orderType: "Market", qty: "1.5" }; const bodyString = JSON.stringify(bodyObj);  const signaturePayload = timestamp + BYBIT_API_KEY + '5000' + bodyString; const signature = crypto.createHmac('sha256', BYBIT_SECRET_KEY).update(signaturePayload).digest('hex');  const options = { hostname: BYBIT_HOST, path: endpoint, method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BAPI-API-KEY': BYBIT_API_KEY, 'X-BAPI-TIMESTAMP': timestamp, 'X-BAPI-SIGN': signature, 'X-BAPI-RECV-WINDOW': '5000' } };  const req = https.request(options, (res) => { let resposta = ''; res.on('data', (chunk) => { resposta += chunk; }); res.on('end', () => { try { const resJson = JSON.parse(resposta); const horaStr = new Date().toLocaleTimeString(); if (resJson.retCode === 0) { dadosPainel.ultimoLog = `[${horaStr}] 🟢 Ordem ${lado} executada com sucesso! Preço: $${precoReferencia}`;
+                    enviarMensagemTelegram(`🚨 *ORDEM REAL EXECUTADA*\n\n• Ação: ${lado}\n• Par: XRP/USDT\n• Preço: $${precoReferencia}\n• Horário: ${horaStr}`); } else { dadosPainel.ultimoLog = `[${horaStr}] ⚠️ Erro Bybit: ${resJson.retMsg}`;
+                }
+            } catch (e) {
+                console.error("Erro ao processar resposta da ordem:", e);
+            }
+        });
+    });
+
+    req.on('error', (e) => {
+        console.error(`Erro na requisição de ordem: ${e.message}`);
+    });
+
+    req.write(bodyString);
     req.end();
 }
+
+// Atualiza dados periodicamente da corretora
+setInterval(() => {
+    consultarSaldoBybit();
+    consultarCotacaoBybit();
+}, 10000);
 
 // --- ROTA DA INTERFACE VISUAL ORIGINAL ---
 app.get('/', (req, res) => {
@@ -66,6 +137,7 @@ app.get('/', (req, res) => {
         <head>
             <meta charset="UTF-8">
             <title>MaxIncome - Nuvem Autónoma 24/7</title>
+            <meta http-equiv="refresh" content="10">
             <style>
                 body { background-color: #0d1117; color: #c9d1d9; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
                 h1 { color: #f0a500; }
@@ -77,33 +149,7 @@ app.get('/', (req, res) => {
         </head>
         <body>
             <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
-            <p>Sistema de Grid Trading Autónomo (Roda Gigante: Compra na Baixa e Venda na Alta)</p>
+            <p>Sistema de Grid Trading Autónomo (Compra na Baixa e Venda na Alta)</p>
             
             <div class="card">
-                <h3>Ativo em Operação: ${estadoAtual.ativo}</h3>
-                <p class="status">🟢 ${estadoAtual.statusRobo}</p>
-            </div>
-
-            <div class="card">
-                <h3>Saldo Disponível (Bybit)</h3>
-                <p class="price">${estadoAtual.saldoUsdt} USDT | ${estadoAtual.saldoXrp} XRP</p>
-            </div>
-
-            <div class="card">
-                <h3>Cotação de Mercado em Tempo Real (XRPUSDT)</h3>
-                <p class="price">$ ${estadoAtual.cotacaoAtual}</p>
-            </div>
-
-            <div class="card">
-                <h3>Registo de Atividade do Grid Trading</h3>
-                <div class="log">${estadoAtual.ultimoLog}</div>
-            </div>
-        </body>
-        </html>
-    `);
-});
-
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor visual e motor a rodar na porta ${PORT}`);
-});
+                <h3>Ativo em Operação: XRP (XRP/USDT)</h3>
