@@ -7,34 +7,168 @@ app.use(express.json());
 
 const BYBIT_API_KEY = process.env.BYBIT_API_KEY || 'SUA_API_KEY_AQUI';
 const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || 'SUA_SECRET_KEY_AQUI';
+const BYBIT_HOST = 'api.bybit.com';
 
-// Endpoint para fornecer as chaves à interface visual de forma segura
-app.get('/get-keys', (req, res) => {
-    res.json({
-        apiKey: BYBIT_API_KEY,
-        secretKey: BYBIT_SECRET_KEY
-    });
-});
+let ultimoPrecoCompra = 1.3115;
+let dadosLog = "Servidor autónomo a operar na nuvem 24/7.";
 
-// --- MOTOR AUTÓNOMO NA NUVEM (Roda 24/7 sem o navegador aberto) ---
-const ATIVOS = ['XRPUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
-
-function iniciarMotorCloud() {
-    console.log("Motor autónomo multi-ativo ativado na nuvem em segundo plano.");
-    
-    setInterval(() => {
-        const agora = new Date();
-        const minutos = agora.getMinutes();
-        const segundos = agora.getSeconds();
-
-        // O servidor na nuvem varre o mercado e gere os ativos continuamente
-        if (minutos % 5 === 0 && segundos <= 5) {
-            console.log(`[Cloud Engine] A analisar o mercado para múltiplos ativos em ${agora.toLocaleTimeString()}`);
-        }
-    }, 5000);
+function asyncCryptoHMAC(secret, message) {
+    return crypto.createHmac('sha256', secret).update(message).digest('hex');
 }
 
-// --- ROTA DA INTERFACE VISUAL ORIGINAL ---
+// --- MOTOR AUTÓNOMO DE EXECUÇÃO NA NUVEM (RODA SOZINHO 24/7) ---
+async function executarMotorCloud() {
+    if (!BYBIT_API_KEY || BYBIT_API_KEY === 'SUA_API_KEY_AQUI') {
+        dadosLog = "[Erro] Chaves da Bybit em falta no servidor.";
+        return;
+    }
+
+    try {
+        // 1. Obter preço atual do XRP
+        const priceRes = await new Promise((resolve) => {
+            https.get(`https://${BYBIT_HOST}/v5/market/tickers?category=spot&symbol=XRPUSDT`, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve(data));
+            }).on('error', () => resolve(null));
+        });
+
+        const priceJson = JSON.parse(priceRes);
+        if (!priceJson.result || !priceJson.result.list[0]) return;
+        const precoAtual = parseFloat(priceJson.result.list[0].lastPrice);
+
+        // 2. Obter saldos reais da conta Bybit (Unified)
+        const timestamp = Date.now().toString();
+        const recvWindow = '60000';
+        const queryString = "accountType=UNIFIED";
+        const signatureSaldo = asyncCryptoHMAC(BYBIT_SECRET_KEY, timestamp + BYBIT_API_KEY + recvWindow + queryString);
+
+        const saldoRes = await new Promise((resolve) => {
+            const options = {
+                hostname: BYBIT_HOST,
+                path: `/v5/account/wallet-balance?${queryString}`,
+                method: 'GET',
+                headers: {
+                    'X-BAPI-API-KEY': BYBIT_API_KEY,
+                    'X-BAPI-SIGN': signatureSaldo,
+                    'X-BAPI-TIMESTAMP': timestamp,
+                    'X-BAPI-RECV-WINDOW': recvWindow
+                }
+            };
+            https.request(options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve(data));
+            }).on('error', () => resolve(null)).end();
+        });
+
+        const saldoData = JSON.parse(saldoRes);
+        let usdtDisponivel = 0;
+        let xrpDisponivel = 0;
+
+        if (saldoData.retCode === 0 && saldoData.result.list[0]) {
+            const moedas = saldoData.result.list[0].coin;
+            for (let m of moedas) {
+                if (m.coin === "USDT") usdtDisponivel = parseFloat(m.walletBalance || 0);
+                if (m.coin === "XRP") xrpDisponivel = parseFloat(m.walletBalance || 0);
+            }
+        }
+
+        const time = new Date().toLocaleTimeString();
+
+        // 3. Lógica de Grid Trading (Venda na alta / Compra na baixa)
+        if (xrpDisponivel >= 1.5) {
+            const alvoLucro = ultimoPrecoCompra * 1.008;
+            dadosLog = `[${time}] 🔍 Tem ${xrpDisponivel.toFixed(2)} XRP. Alvo de Venda: $${alvoLucro.toFixed(4)} (Atual: $${precoAtual.toFixed(4)})`;
+
+            if (precoAtual >= alvoLucro) {
+                const bodyData = {
+                    category: "spot",
+                    symbol: "XRPUSDT",
+                    side: "Sell",
+                    orderType: "Market",
+                    qty: Math.floor(xrpDisponivel).toString()
+                };
+                const jsonBody = JSON.stringify(bodyData);
+                const sigOrder = asyncCryptoHMAC(BYBIT_SECRET_KEY, timestamp + BYBIT_API_KEY + recvWindow + jsonBody);
+
+                await new Promise((resolve) => {
+                    const options = {
+                        hostname: BYBIT_HOST,
+                        path: '/v5/order/create',
+                        method: 'POST',
+                        headers: {
+                            'X-BAPI-API-KEY': BYBIT_API_KEY,
+                            'X-BAPI-SIGN': sigOrder,
+                            'X-BAPI-TIMESTAMP': timestamp,
+                            'X-BAPI-RECV-WINDOW': recvWindow,
+                            'Content-Type': 'application/json'
+                        }
+                    };
+                    const req = https.request(options, (res) => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => resolve(data));
+                    });
+                    req.write(jsonBody);
+                    req.end();
+                });
+                dadosLog = `[${time}] 💰 VENDA REALIZADA COM SUCESSO NA NUVEM!`;
+            }
+        } else if (usdtDisponivel >= 1.0) {
+            dadosLog = `[${time}] 🔍 Tem ${usdtDisponivel.toFixed(2)} USDT. A monitorizar oportunidade de compra...`;
+
+            const bodyData = {
+                category: "spot",
+                symbol: "XRPUSDT",
+                side: "Buy",
+                orderType: "Market",
+                qty: "2"
+            };
+            const jsonBody = JSON.stringify(bodyData);
+            const sigOrder = asyncCryptoHMAC(BYBIT_SECRET_KEY, timestamp + BYBIT_API_KEY + recvWindow + jsonBody);
+
+            await new Promise((resolve) => {
+                const options = {
+                    hostname: BYBIT_HOST,
+                    path: '/v5/order/create',
+                    method: 'POST',
+                    headers: {
+                        'X-BAPI-API-KEY': BYBIT_API_KEY,
+                        'X-BAPI-SIGN': sigOrder,
+                        'X-BAPI-TIMESTAMP': timestamp,
+                        'X-BAPI-RECV-WINDOW': recvWindow,
+                        'Content-Type': 'application/json'
+                    }
+                };
+                const req = https.request(options, (res) => {
+                    let data = '';
+                    res.on('data', chunk => data += chunk);
+                    res.on('end', () => resolve(data));
+                });
+                req.write(jsonBody);
+                req.end();
+            });
+            ultimoPrecoCompra = precoAtual;
+            dadosLog = `[${time}] ✅ COMPRA REALIZADA COM SUCESSO NA NUVEM!`;
+        }
+    } catch (e) {
+        console.error("Erro no motor cloud:", e);
+    }
+}
+
+// O motor executa automaticamente a cada 20 segundos na nuvem
+setInterval(executarMotorCloud, 20000);
+
+app.get('/status-log', (req, res) => {
+    res.json({ log: dadosLog });
+});
+
+app.get('/get-keys', (req, res) => {
+    res.json({ apiKey: BYBIT_API_KEY, secretKey: BYBIT_SECRET_KEY });
+});
+
+// --- ROTA DO PAINEL VISUAL ---
 app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html>
 <html lang="pt">
@@ -52,13 +186,13 @@ app.get('/', (req, res) => {
 <body>
 
     <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
-    <p>Sistema Multi-Ativo de Grid Trading (XRP, BTC, ETH, SOL)</p>
+    <p>Sistema de Grid Trading Autónomo (Roda Gigante: Compra na Baixa e Venda na Alta)</p>
 
     <div class="card">
-        <label><strong>Ativos em Operação:</strong> XRP, BTC, ETH, SOL (Multi-Ativo)</label>
+        <label><strong>Ativo em Operação:</strong> XRP (XRP/USDT)</label>
     </div>
 
-    <div class="status-box">🟢 Robô em Ciclo Perpétuo Ativo na Nuvem</div>
+    <div class="status-box">🟢 Robô em Ciclo Perpétuo Ativo na Nuvem (24/7)</div>
 
     <div class="card">
         <h3>Saldo Disponível (Bybit)</h3>
@@ -71,94 +205,39 @@ app.get('/', (req, res) => {
     </div>
 
     <div class="card">
-        <h3>Registo de Atividade do Grid Trading (Multi-Ativo)</h3>
-        <div id="tradeLog" class="trade-log">A sincronizar com a corretora...</div>
+        <h3>Registo de Atividade do Grid Trading (Servidor Cloud)</h3>
+        <div id="tradeLog" class="trade-log">A sincronizar com a nuvem...</div>
     </div>
 
     <script>
-        let ultimoPrecoCompra = 1.3115;
-
-        async function asyncCryptoHMAC(secret, message) {
-            const enc = new TextEncoder();
-            const key = await crypto.subtle.importKey(
-                "raw", enc.encode(secret), { name: "HMAC", hash: { name: "SHA-256" } }, false, ["sign"]
-            );
-            const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
-            return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
-        }
-
-        async function obterChaves() {
-            const res = await fetch('/get-keys');
-            return await res.json();
-        }
-
         async function atualizarPainel() {
             try {
-                const res = await fetch(\`https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT\`);
+                const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT');
                 const data = await res.json();
                 if (data && data.price) {
-                    const precoAtual = parseFloat(data.price);
-                    document.getElementById('currentPrice').innerText = \`$ \${precoAtual.toFixed(4)}\`;
-                    executarCicloInteligente(precoAtual);
+                    document.getElementById('currentPrice').innerText = '$ ' + parseFloat(data.price).toFixed(4);
+                }
+
+                const logRes = await fetch('/status-log');
+                const logData = await logRes.json();
+                if (logData.log) {
+                    document.getElementById('tradeLog').innerText = logData.log + '\\n' + document.getElementById('tradeLog').innerText;
                 }
             } catch (e) {
                 console.error(e);
             }
         }
 
-        async function executarCicloInteligente(precoAtual) {
-            const keys = await obterChaves();
-            if (!keys.apiKey || !keys.secretKey) return;
-
-            const logBox = document.getElementById('tradeLog');
-            const time = new Date().toLocaleTimeString();
-
-            const timeRes = await fetch('https://api.binance.com/api/v3/time');
-            const timeData = await timeRes.json();
-            const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
-            const recvWindow = '60000';
-
-            const queryString = "accountType=UNIFIED";
-            const signatureSaldo = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + queryString);
-            
-            const saldoRes = await fetch(\`https://api.bybit.com/v5/account/wallet-balance?\${queryString}\`, {
-                method: 'GET',
-                headers: {
-                    'X-BAPI-API-KEY': keys.apiKey,
-                    'X-BAPI-SIGN': signatureSaldo,
-                    'X-BAPI-TIMESTAMP': serverTimestamp,
-                    'X-BAPI-RECV-WINDOW': recvWindow
-                }
-            });
-            const saldoData = await saldoRes.json();
-
-            let usdtDisponivel = 0;
-            let xrpDisponivel = 0;
-
-            if (saldoData.retCode === 0 && saldoData.result.list[0]) {
-                const moedas = saldoData.result.list[0].coin;
-                for (let m of moedas) {
-                    if (m.coin === "USDT") usdtDisponivel = parseFloat(m.walletBalance || 0);
-                    if (m.coin === "XRP") xrpDisponivel = parseFloat(m.walletBalance || 0);
-                }
-            }
-
-            document.getElementById('saldoInfo').innerText = \`\${usdtDisponivel.toFixed(2)} USDT | \${xrpDisponivel.toFixed(2)} XRP\`;
-            logBox.innerText = \`[\${time}] 🔍 Monitorizando XRP, BTC, ETH e SOL. Saldo USDT: $\${usdtDisponivel.toFixed(2)}\n\` + logBox.innerText;
-        }
-
         window.addEventListener('DOMContentLoaded', () => {
             atualizarPainel();
-            setInterval(atualizarPainel, 20000);
+            setInterval(atualizarPainel, 15000);
         });
     </script>
-
 </body>
 </html>`);
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`MaxIncome autónomo a operar na porta ${PORT}`);
-    iniciarMotorCloud();
+    console.log(`MaxIncome cloud engine a operar na porta ${PORT}`);
 });
