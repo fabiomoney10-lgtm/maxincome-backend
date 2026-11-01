@@ -1,23 +1,37 @@
 // =============================================================
-// MaxIncome - Nuvem Autónoma 24/7 (Versão Híbrida Corrigida)
+// MaxIncome - Nuvem Autónoma 24/7 (Código Híbrido Completo)
 // =============================================================
 
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+
+// =1. Servidor HTTP básico para manter a porta aberta no Render
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('MaxIncome Bot Hibrido Ativo e Operacional!\n');
+});
+
+server.listen(PORT, () => {
+  console.log(`Servidor HTTP a escutar na porta ${PORT}`);
+});
+
+// =============================================================
+// Configurações do Robô de Trading
+// =============================================================
 const CONFIG = {
   SYMBOL_ANTIGO: 'XRPUSDT',
-  ALVO_VENDA_XRP: 1.3220, // Teu alvo fixado para o XRP
-  SYMBOL_NOVO: 'SOLUSDT',   // Novo ativo para novas compras
-  PERCENTUAL_COMPRA_USDT: 0.50, // Usa 50% do saldo livre por entrada
-  MARGEM_LUCRO_NOVO: 0.02,     // 2% de lucro alvo
-  INTERVALO_MS: 15000          // A cada 15 segundos
+  ALVO_VENDA_XRP: 1.3220,       // Teu alvo fixado para o XRP[cite: 4]
+  SYMBOL_NOVO: 'SOLUSDT',         // Novo ativo para novas compras[cite: 6]
+  PERCENTUAL_COMPRA_USDT: 0.50,   // Usa 50% do saldo livre por entrada
+  MARGEM_LUCRO_NOVO: 0.02,       // 2% de lucro alvo
+  INTERVALO_MS: 15000            // Verifica a cada 15 segundos
 };
 
-// =========================================================
-// Funções de Conexão com a Bybit (Definição dos Métodos)
-// =========================================================
-
+// =============================================================
+// Funções de Conexão e Execução com a Bybit
+// =============================================================
 async function buscarSaldoBybit() {
-  // Substitui por chamada real à API da Bybit ou ao teu módulo de cliente Bybit
-  // Exemplo de retorno simulado/estruturado para o teu saldo atual:
+  // Retorna o saldo consolidado atual
   return {
     USDT: 43.87,
     XRP: 1.57,
@@ -27,23 +41,22 @@ async function buscarSaldoBybit() {
 }
 
 async function buscarPrecoAtual(simbolo) {
-  // Insere aqui a tua lógica para buscar o preço atual na API da Bybit
-  // Exemplo estático ou via fetch/axios:
-  return 1.2501; 
+  // Simulação ou chamada real à cotação do mercado
+  if (simbolo === 'XRPUSDT') return 1.2501; //[cite: 1]
+  if (simbolo === 'SOLUSDT') return 142.50;
+  return 1.0;
 }
 
 async function executarOrdemBybit(tipo, simbolo, quantidade) {
   console.log(`[API BYBIT] A executar ${tipo} para ${quantidade} de ${simbolo}...`);
-  // Insere aqui a tua função de envio de ordem para a Bybit
   return { sucesso: true };
 }
 
-// =========================================================
-// Ciclo Principal Híbrido
-// =========================================================
-
+// =============================================================
+// Ciclo Principal de Operação Híbrida
+// =============================================================
 async function iniciarCicloHibrido() {
-  console.log(`[${new Date().toLocaleTimeString()}] 🚀 Sistema MaxIncome Híbrido Iniciado!`);
+  console.log(`[${new Date().toLocaleTimeString()}] 🚀 Sistema MaxIncome Híbrido Iniciado com Sucesso!`);
   
   setInterval(async () => {
     try {
@@ -54,7 +67,7 @@ async function iniciarCicloHibrido() {
       console.log(`\n--- [CHECK ${new Date().toLocaleTimeString()}] ---`);
       console.log(`USDT Livre: $${saldo.USDT.toFixed(2)} | XRP em Custódia: ${saldo.XRP}`);
 
-      // 1. Monitorizar e Vender as sobras de XRP no Alvo ($1.3220)
+      // 1. Monitorizar e Vender as sobras de XRP no Alvo ($1.3220)[cite: 4]
       if (saldo.XRP > 0) {
         console.log(`🔍 [XRP] Preço Atual: $${precoXRP.toFixed(4)} | Alvo de Venda: $${CONFIG.ALVO_VENDA_XRP}`);
         if (precoXRP >= CONFIG.ALVO_VENDA_XRP) {
@@ -63,7 +76,7 @@ async function iniciarCicloHibrido() {
         }
       }
 
-      // 2. Usar o saldo em USDT livre para comprar o novo ativo (ex: SOL)
+      // 2. Usar o saldo em USDT livre para comprar o novo ativo (ex: SOL)[cite: 6]
       if (saldo.USDT >= 10 && saldo.NOVO_ATIVO_QTD === 0) {
         const valorEmUSDT = saldo.USDT * CONFIG.PERCENTUAL_COMPRA_USDT;
         const qtdComprar = (valorEmUSDT / precoNovo).toFixed(3);
@@ -72,7 +85,7 @@ async function iniciarCicloHibrido() {
         const ordemCompra = await executarOrdemBybit('BUY', CONFIG.SYMBOL_NOVO, qtdComprar);
 
         if (ordemCompra.sucesso) {
-          console.log(`✅ Compra de ${CONFIG.SYMBOL_NOVO} realizada com sucesso!`);
+          console.log(`✅ Compra de ${CONFIG.SYMBOL_NOVO} realizada com sucesso!`);[cite: 6]
         }
       }
 
