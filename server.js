@@ -26,11 +26,9 @@ async function executarMotorCloud() {
     }
 
     try {
-        // Roda pelos ativos da lista (XRP, BTC, ETH, SOL)
         const simbolo = ATIVOS[ativoAtualIndex];
         ativoAtualIndex = (ativoAtualIndex + 1) % ATIVOS.length;
 
-        // 1. Obter preço atual do ativo na Bybit
         const priceRes = await new Promise((resolve) => {
             https.get(`https://${BYBIT_HOST}/v5/market/tickers?category=spot&symbol=${simbolo}`, (res) => {
                 let data = '';
@@ -44,7 +42,6 @@ async function executarMotorCloud() {
         const precoAtual = parseFloat(priceJson.result.list[0].lastPrice);
         cotacoesAtivas[simbolo] = precoAtual;
 
-        // 2. Obter saldos da conta Bybit
         const timestamp = Date.now().toString();
         const recvWindow = '60000';
         const queryString = "accountType=UNIFIED";
@@ -71,19 +68,16 @@ async function executarMotorCloud() {
 
         const saldoData = JSON.parse(saldoRes);
         let usdtDisponivel = 0;
-        let qtdAtivo = 0;
 
         if (saldoData.retCode === 0 && saldoData.result.list[0]) {
             const moedas = saldoData.result.list[0].coin;
             for (let m of moedas) {
                 if (m.coin === "USDT") usdtDisponivel = parseFloat(m.walletBalance || 0);
-                const moedaAlvo = simbolo.replace('USDT', '');
-                if (m.coin === moedaAlvo) qtdAtivo = parseFloat(m.walletBalance || 0);
             }
         }
 
         const time = new Date().toLocaleTimeString();
-        dadosLog = `[${time}] 🔍 A analisar ativo: ${simbolo} | Preço: $${precoAtual} | USDT: $${usdtDisponivel.toFixed(2)}`;
+        dadosLog = `[${time}] 🔍 A analisar: ${simbolo} | Preço: $${precoAtual} | USDT: $${usdtDisponivel.toFixed(2)}`;
 
     } catch (e) {
         console.error("Erro no motor multi-ativo:", e);
@@ -100,7 +94,7 @@ app.get('/get-keys', (req, res) => {
     res.json({ apiKey: BYBIT_API_KEY, secretKey: BYBIT_SECRET_KEY });
 });
 
-// --- PAINEL VISUAL MULTI-ATIVO ---
+// --- PAINEL VISUAL CORRIGIDO ---
 app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html>
 <html lang="pt">
@@ -165,7 +159,6 @@ app.get('/', (req, res) => {
 
         async function atualizarPainel() {
             try {
-                // Atualizar cotações de todos os ativos via Bybit public ticker
                 ['XRPUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT'].forEach(async (simbolo) => {
                     const res = await fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=' + simbolo);
                     const data = await res.json();
@@ -176,7 +169,6 @@ app.get('/', (req, res) => {
                     }
                 });
 
-                // Puxar saldos reais
                 const keys = await obterChaves();
                 if (keys.apiKey && keys.secretKey) {
                     const timeRes = await fetch('https://api.binance.com/api/v3/time');
@@ -205,7 +197,8 @@ app.get('/', (req, res) => {
                             if (m.coin === "ETH") eth = parseFloat(m.walletBalance || 0);
                             if (m.coin === "SOL") sol = parseFloat(m.walletBalance || 0);
                         }
-                        document.getElementById('saldoInfo'.innerText = usdt.toFixed(2) + ' USDT | XRP: ' + xrp.toFixed(2) + ' | BTC: ' + btc.toFixed(4));
+                        // CORRIGIDO AQUI O ERRO DO ELEMENTO ID
+                        document.getElementById('saldoInfo').innerText = usdt.toFixed(2) + ' USDT | XRP: ' + xrp.toFixed(2) + ' | BTC: ' + btc.toFixed(4) + ' | ETH: ' + eth.toFixed(4) + ' | SOL: ' + sol.toFixed(2);
                     }
                 }
 
