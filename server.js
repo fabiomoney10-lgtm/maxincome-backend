@@ -24,7 +24,6 @@ async function executarMotorCloud() {
     }
 
     try {
-        // 1. Obter preço atual do XRP
         const priceRes = await new Promise((resolve) => {
             https.get(`https://${BYBIT_HOST}/v5/market/tickers?category=spot&symbol=XRPUSDT`, (res) => {
                 let data = '';
@@ -37,7 +36,6 @@ async function executarMotorCloud() {
         if (!priceJson.result || !priceJson.result.list[0]) return;
         const precoAtual = parseFloat(priceJson.result.list[0].lastPrice);
 
-        // 2. Obter saldos reais da conta Bybit (Unified)
         const timestamp = Date.now().toString();
         const recvWindow = '60000';
         const queryString = "accountType=UNIFIED";
@@ -76,7 +74,6 @@ async function executarMotorCloud() {
 
         const time = new Date().toLocaleTimeString();
 
-        // 3. Lógica de Grid Trading (Venda na alta / Compra na baixa)
         if (xrpDisponivel >= 1.5) {
             const alvoLucro = ultimoPrecoCompra * 1.008;
             dadosLog = `[${time}] 🔍 Tem ${xrpDisponivel.toFixed(2)} XRP. Alvo de Venda: $${alvoLucro.toFixed(4)} (Atual: $${precoAtual.toFixed(4)})`;
@@ -157,7 +154,6 @@ async function executarMotorCloud() {
     }
 }
 
-// O motor executa automaticamente a cada 20 segundos na nuvem
 setInterval(executarMotorCloud, 20000);
 
 app.get('/status-log', (req, res) => {
@@ -168,7 +164,7 @@ app.get('/get-keys', (req, res) => {
     res.json({ apiKey: BYBIT_API_KEY, secretKey: BYBIT_SECRET_KEY });
 });
 
-// --- ROTA DO PAINEL VISUAL ---
+// --- ROTA DO PAINEL VISUAL COM COMUNICAÇÃO DIRETA À BYBIT ---
 app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html>
 <html lang="pt">
@@ -210,12 +206,56 @@ app.get('/', (req, res) => {
     </div>
 
     <script>
+        async function asyncCryptoHMAC(secret, message) {
+            const enc = new TextEncoder();
+            const key = await crypto.subtle.importKey(
+                "raw", enc.encode(secret), { name: "HMAC", hash: { name: "SHA-256" } }, false, ["sign"]
+            );
+            const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+            return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function obterChaves() {
+            const res = await fetch('/get-keys');
+            return await res.json();
+        }
+
         async function atualizarPainel() {
             try {
                 const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT');
                 const data = await res.json();
                 if (data && data.price) {
                     document.getElementById('currentPrice').innerText = '$ ' + parseFloat(data.price).toFixed(4);
+                }
+
+                // Puxar saldos diretamente da Bybit para o painel
+                const keys = await obterChaves();
+                if (keys.apiKey && keys.secretKey) {
+                    const timeRes = await fetch('https://api.binance.com/api/v3/time');
+                    const timeData = await timeRes.json();
+                    const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
+                    const recvWindow = '60000';
+                    const queryString = "accountType=UNIFIED";
+                    const signatureSaldo = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + queryString);
+                    
+                    const saldoRes = await fetch('https://api.bybit.com/v5/account/wallet-balance?' + queryString, {
+                        method: 'GET',
+                        headers: {
+                            'X-BAPI-API-KEY': keys.apiKey,
+                            'X-BAPI-SIGN': signatureSaldo,
+                            'X-BAPI-TIMESTAMP': serverTimestamp,
+                            'X-BAPI-RECV-WINDOW': recvWindow
+                        }
+                    });
+                    const saldoData = await saldoRes.json();
+                    let usdt = 0, xrp = 0;
+                    if (saldoData.retCode === 0 && saldoData.result.list[0]) {
+                        for (let m of saldoData.result.list[0].coin) {
+                            if (m.coin === "USDT") usdt = parseFloat(m.walletBalance || 0);
+                            if (m.coin === "XRP") xrp = parseFloat(m.walletBalance || 0);
+                        }
+                        document.getElementById('saldoInfo').innerText = usdt.toFixed(2) + ' USDT | ' + xrp.toFixed(2) + ' XRP';
+                    }
                 }
 
                 const logRes = await fetch('/status-log');
