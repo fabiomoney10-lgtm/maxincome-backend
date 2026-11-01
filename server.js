@@ -1,5 +1,4 @@
 const express = require('express');
-const fetch = require('node-fetch'); // ou fetch nativo do Node.js
 const app = express();
 
 app.use(express.json());
@@ -8,7 +7,7 @@ app.use(express.json());
 const TELEGRAM_TOKEN = '9179415153:AAGUvi8GmakFwjrxT_3BM2IoqqYkIssGTag';
 const CHAT_ID = '1633419568';
 
-// Função para enviar mensagens para o Telegram
+// Função para enviar mensagens para o Telegram usando fetch nativo
 async function sendTelegramMessage(text) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
     try {
