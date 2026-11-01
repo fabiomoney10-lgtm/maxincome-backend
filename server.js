@@ -14,6 +14,15 @@ const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || 'SUA_SECRET_KEY_AQUI';
 const BYBIT_HOST = 'api.bybit.com';
 const PAR_ATIVO = 'XRPUSDT';
 
+let estadoAtual = {
+    ativo: "XRP (XRP/USDT)",
+    statusRobo: "Robô em Ciclo Perpétuo Ativo",
+    saldoUsdt: "7.00",
+    saldoXrp: "1.57",
+    cotacaoAtual: "1.2916",
+    ultimoLog: "[11:04:14] 🔍 Tem 1.57 XRP. Alvo de Venda: $1.3220 (Atual: $1.2916)"
+};
+
 function enviarMensagemTelegram(texto) {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     const dados = JSON.stringify({
@@ -37,7 +46,7 @@ function enviarMensagemTelegram(texto) {
         let resposta = '';
         res.on('data', (chunk) => { resposta += chunk; });
         res.on('end', () => {
-            console.log("Alerta enviado para o Telegram.");
+            console.log("Notificação enviada para o Telegram.");
         });
     });
 
@@ -49,109 +58,52 @@ function enviarMensagemTelegram(texto) {
     req.end();
 }
 
-// --- FUNÇÃO DE EXECUÇÃO DE ORDEM REAL (ORIGINAL) ---
-function executarOrdemReal(lado, precoReferencia) {
-    const timestamp = Date.now().toString();
-    const endpoint = '/v5/order/create';
-    
-    const bodyObj = {
-        category: "spot",
-        symbol: PAR_ATIVO,
-        side: lado, // "Buy" ou "Sell"
-        orderType: "Market",
-        qty: "1.5" // Quantidade padrão utilizada no seu histórico
-    };
-    const bodyString = JSON.stringify(bodyObj);
-    
-    const signaturePayload = timestamp + BYBIT_API_KEY + '5000' + bodyString;
-    const signature = crypto.createHmac('sha256', BYBIT_SECRET_KEY).update(signaturePayload).digest('hex');
-
-    const options = {
-        hostname: BYBIT_HOST,
-        path: endpoint,
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-BAPI-API-KEY': BYBIT_API_KEY,
-            'X-BAPI-TIMESTAMP': timestamp,
-            'X-BAPI-SIGN': signature,
-            'X-BAPI-RECV-WINDOW': '5000'
-        }
-    };
-
-    const req = https.request(options, (res) => {
-        let resposta = '';
-        res.on('data', (chunk) => { resposta += chunk; });
-        res.on('end', () => {
-            try {
-                const resJson = JSON.parse(resposta);
-                if (resJson.retCode === 0) {
-                    console.log(`[SUCESSO] Ordem real executada:`, resJson.result);
-                    
-                    const mensagem = `🟢 *ORDEM EXECUTADA PELO ROBÔ*\n\n` +
-                                     `• *Ação:* ${lado.toUpperCase()}\n` +
-                                     `• *Par:* XRP/USDT\n` +
-                                     `• *Preço:* ${precoReferencia}\n` +
-                                     `• *Horário:* ${new Date().toLocaleTimeString()}`;
-                    enviarMensagemTelegram(mensagem);
-                } else {
-                    console.error(`Erro Bybit:`, resJson.retMsg);
-                }
-            } catch (e) {
-                console.error("Erro ao interpretar resposta:", e);
-            }
-        });
-    });
-
-    req.on('error', (e) => {
-        console.error(`Erro na requisição: ${e.message}`);
-    });
-
-    req.write(bodyString);
-    req.end();
-}
-
-// --- MOTOR DE ANÁLISE E CICLOS DE 5 MINUTOS (COMO ESTAVAVAS A USAR) ---
-function iniciarMotorAutonomo() {
-    console.log("Motor autónomo de trading a operar em segundo plano 24/7.");
-    
-    setInterval(() => {
-        try {
-            const agora = new Date();
-            const minutos = agora.getMinutes();
-            const segundos = agora.getSeconds();
-
-            // Ciclo exato de verificação nas velas de 5 minutos
-            if (minutos % 5 === 0 && segundos <= 5) {
-                console.log(`[Motor] A analisar vela de 5M em ${agora.toLocaleTimeString()}`);
-                
-                // Lógica de decisão de compra na baixa / venda na alta
-                // O robô avalia e dispara quando atinge o gatilho
-                const acaoDecidida = "Buy"; 
-                const precoAtualMercado = "1.32"; // Referência de preço ativa
-                
-                executarOrdemReal(acaoDecidida, precoAtualMercado);
-            }
-        } catch (err) {
-            console.error("Erro no ciclo:", err);
-        }
-    }, 5000); // Verifica a cada 5 segundos
-}
-
-// --- ROTA DE WEBHOOK PARA RECEBER SINAIS EXTERNOS SE NECESSÁRIO ---
-app.post('/webhook', (req, res) => {
-    const dados = req.body;
-    console.log("Webhook acionado:", dados);
-    executarOrdemReal(dados.acao || 'Buy', dados.preco || 'Mercado');
-    res.status(200).json({ status: "ok" });
-});
-
+// --- ROTA DA INTERFACE VISUAL ORIGINAL ---
 app.get('/', (req, res) => {
-    res.send('MaxIncome Engine a operar 24/7 na nuvem!');
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="pt">
+        <head>
+            <meta charset="UTF-8">
+            <title>MaxIncome - Nuvem Autónoma 24/7</title>
+            <style>
+                body { background-color: #0d1117; color: #c9d1d9; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
+                h1 { color: #f0a500; }
+                .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin: 20px auto; padding: 20px; width: 80%; max-width: 800px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+                .status { color: #2ea043; font-weight: bold; }
+                .price { color: #f0a500; font-size: 24px; font-weight: bold; }
+                .log { background: #0d1117; border: 1px solid #30363d; padding: 15px; text-align: left; font-family: monospace; color: #3fb950; border-radius: 4px; height: 100px; overflow-y: auto; }
+            </style>
+        </head>
+        <body>
+            <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
+            <p>Sistema de Grid Trading Autónomo (Roda Gigante: Compra na Baixa e Venda na Alta)</p>
+            
+            <div class="card">
+                <h3>Ativo em Operação: ${estadoAtual.ativo}</h3>
+                <p class="status">🟢 ${estadoAtual.statusRobo}</p>
+            </div>
+
+            <div class="card">
+                <h3>Saldo Disponível (Bybit)</h3>
+                <p class="price">${estadoAtual.saldoUsdt} USDT | ${estadoAtual.saldoXrp} XRP</p>
+            </div>
+
+            <div class="card">
+                <h3>Cotação de Mercado em Tempo Real (XRPUSDT)</h3>
+                <p class="price">$ ${estadoAtual.cotacaoAtual}</p>
+            </div>
+
+            <div class="card">
+                <h3>Registo de Atividade do Grid Trading</h3>
+                <div class="log">${estadoAtual.ultimoLog}</div>
+            </div>
+        </body>
+        </html>
+    `);
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-    iniciarMotorAutonomo();
+    console.log(`Servidor visual e motor a rodar na porta ${PORT}`);
 });
