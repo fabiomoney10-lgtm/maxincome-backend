@@ -8,12 +8,12 @@ app.use(express.json());
 // --- CONFIGURAÇÕES DA CORRETORA (BYBIT) E TELEGRAM ---
 const BYBIT_API_KEY = 'SUA_API_KEY_AQUI';
 const BYBIT_SECRET_KEY = 'SUA_SECRET_KEY_AQUI';
-const BYBIT_HOST = 'api.bybit.com'; // Use api-testnet.bybit.com se estiver a testar em simulador
+const BYBIT_HOST = 'api.bybit.com';
 
 const TELEGRAM_BOT_TOKEN = '9179415153:AAGUvi8GmakFwjrxT_3BM2IoqqYkIssGTag';
 const TELEGRAM_CHAT_ID = '1633419568';
 
-const PAR_ATIVO = 'XRPUSDT'; // Formato exigido pela API da Bybit
+const PAR_ATIVO = 'XRPUSDT';
 
 function enviarMensagemTelegram(texto) {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -38,7 +38,7 @@ function enviarMensagemTelegram(texto) {
         let resposta = '';
         res.on('data', (chunk) => { resposta += chunk; });
         res.on('end', () => {
-            console.log("Alerta de ordem executada enviado para o Telegram.");
+            console.log("Alerta de teste enviado para o Telegram.");
         });
     });
 
@@ -50,12 +50,6 @@ function enviarMensagemTelegram(texto) {
     req.end();
 }
 
-// Função para gerar assinatura HMAC exigida pela segurança da Bybit V5
-function assinarRequisicao(paramsString, timestamp) {
-    const signaturePayload = timestamp + BYBIT_API_KEY + '5000' + paramsString;
-    return crypto.createHmac('sha256', BYBIT_SECRET_KEY).update(signaturePayload).digest('hex');
-}
-
 // Função para executar ordem real na Bybit
 function executarOrdemReal(lado, precoAtual) {
     const timestamp = Date.now().toString();
@@ -64,13 +58,12 @@ function executarOrdemReal(lado, precoAtual) {
     const bodyObj = {
         category: "spot",
         symbol: PAR_ATIVO,
-        side: lado, // "Buy" ou "Sell"
+        side: lado, 
         orderType: "Market",
-        qty: "5.0" // Quantidade ajustável por operação
+        qty: "5.0" 
     };
     const bodyString = JSON.stringify(bodyObj);
     
-    // Assinatura para pedidos POST na Bybit V5
     const signaturePayload = timestamp + BYBIT_API_KEY + '5000' + bodyString;
     const signature = crypto.createHmac('sha256', BYBIT_SECRET_KEY).update(signaturePayload).digest('hex');
 
@@ -94,17 +87,17 @@ function executarOrdemReal(lado, precoAtual) {
             try {
                 const resJson = JSON.parse(resposta);
                 if (resJson.retCode === 0) {
-                    console.log(`[SUCESSO] Ordem real executada na Bybit:`, resJson.result);
+                    console.log(`[SUCESSO] Ordem real de teste executada na Bybit:`, resJson.result);
                     
-                    // DISPARA O ALERTA PARA O TELEGRAM APENAS APÓS A EXECUÇÃO REAL
-                    const mensagem = `🚨 *ORDEM REAL EXECUTADA*\n\n` +
+                    const mensagem = `🚨 *TESTE DE ORDEM REAL EXECUTADA*\n\n` +
                                      `• *Ação:* ${lado.toUpperCase()}\n` +
                                      `• *Par:* XRP/USDT\n` +
                                      `• *Preço:* ${precoAtual}\n` +
                                      `• *Horário:* ${new Date().toLocaleTimeString()}`;
                     enviarMensagemTelegram(mensagem);
                 } else {
-                    console.error(`Erro retornado pela Bybit:`, resJson.retMsg);
+                    console.error(`Erro retornado pela Bybit no teste:`, resJson.retMsg);
+                    enviarMensagemTelegram(`⚠️ *Erro na Ordem Real de Teste:* ${resJson.retMsg}`);
                 }
             } catch (e) {
                 console.error("Erro ao interpretar resposta da Bybit:", e);
@@ -120,39 +113,15 @@ function executarOrdemReal(lado, precoAtual) {
     req.end();
 }
 
-// --- MOTOR DE MONITORIZAÇÃO AUTÓNOMA 24/7 ---
-function iniciarMonitorizacaoNuvem() {
-    console.log("Motor de execução autónoma de ordens reais ativo na nuvem.");
-    
-    setInterval(() => {
-        try {
-            const agora = new Date();
-            const minutos = agora.getMinutes();
-            const segundos = agora.getSeconds();
-
-            // Respeita a regra temporal: fecho da vela de 5M nos primeiros segundos
-            if (minutos % 5 === 0 && segundos <= 10) {
-                console.log(`[Cloud Engine] Janela atingida em ${agora.toLocaleTimeString()}. A consultar mercado...`);
-                
-                // Exemplo de chamada para obter preço e decidir o sinal (Compra ou Venda)
-                // Aqui o robô executa a ordem real baseada na estratégia:
-                const acaoBot = "Buy"; // O seu algoritmo decide se é Buy ou Sell
-                const precoReferencia = "1.32"; // Preço obtido da análise
-                
-                executarOrdemReal(acaoBot, precoReferencia);
-            }
-        } catch (err) {
-            console.error("Erro no ciclo de ordens:", err);
-        }
-    }, 10000); // Verifica a cada 10 segundos
-}
-
 app.get('/', (req, res) => {
-    res.send('MaxIncome Engine de Ordens Reais a operar 24/7!');
+    res.send('MaxIncome Engine de Teste de Ordens Reais a operar!');
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor de execução a rodar na porta ${PORT}`);
-    iniciarMonitorizacaoNuvem();
+    console.log(`Servidor a rodar na porta ${PORT}`);
+    
+    // TESTE IMEDIATO AO ARRANCAR O SERVIDOR (Executa assim que o Render fizer deploy)
+    console.log("A disparar teste de ordem real imediata...");
+    executarOrdemReal("Buy", "Mercado (Teste)");
 });
