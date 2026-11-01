@@ -7,7 +7,7 @@ app.use(express.json());
 const TELEGRAM_TOKEN = '9179415153:AAGUvi8GmakFwjrxT_3BM2IoqqYkIssGTag';
 const CHAT_ID = '1633419568';
 
-// Função para enviar mensagens para o Telegram usando fetch nativo
+// Função para enviar mensagens para o Telegram
 async function sendTelegramMessage(text) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
     try {
@@ -29,12 +29,12 @@ async function sendTelegramMessage(text) {
     }
 }
 
-// Rota de teste/status para manter o servidor ativo no Render
+// Rota de status para manter o servidor ativo no Render
 app.get('/', (req, res) => {
     res.send('Servidor de Alertas MaxIncome a funcionar 24/7!');
 });
 
-// Endpoint para receber e disparar os sinais de Compra/Venda
+// Endpoint para receber e disparar os sinais de Compra/Venda via webhook
 app.post('/webhook', async (req, res) => {
     const { acao, par, preco, horario } = req.body;
     
