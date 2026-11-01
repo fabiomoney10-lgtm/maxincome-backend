@@ -5,14 +5,14 @@ const crypto = require('crypto');
 const app = express();
 app.use(express.json());
 
-// --- CONFIGURAÇÕES DA CORRETORA (BYBIT) E TELEGRAM ---
-const BYBIT_API_KEY = 'SUA_API_KEY_AQUI';
-const BYBIT_SECRET_KEY = 'SUA_SECRET_KEY_AQUI';
+// --- CONFIGURAÇÕES DE ACESSO ---
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '9179415153:AAGUvi8GmakFwjrxT_3BM2IoqqYkIssGTag';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1633419568';
+
+// Insira as suas chaves reais da Bybit diretamente aqui ou configure no Render
+const BYBIT_API_KEY = process.env.BYBIT_API_KEY || 'SUA_API_KEY_AQUI';
+const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || 'SUA_SECRET_KEY_AQUI';
 const BYBIT_HOST = 'api.bybit.com';
-
-const TELEGRAM_BOT_TOKEN = '9179415153:AAGUvi8GmakFwjrxT_3BM2IoqqYkIssGTag';
-const TELEGRAM_CHAT_ID = '1633419568';
-
 const PAR_ATIVO = 'XRPUSDT';
 
 function enviarMensagemTelegram(texto) {
@@ -38,32 +38,33 @@ function enviarMensagemTelegram(texto) {
         let resposta = '';
         res.on('data', (chunk) => { resposta += chunk; });
         res.on('end', () => {
-            console.log("Alerta de teste enviado para o Telegram.");
+            console.log("Notificação enviada para o Telegram com sucesso.");
         });
     });
 
     req.on('error', (e) => {
-        console.error(`Erro ao enviar telegram: ${e.message}`);
+        console.error(`Erro ao enviar mensagem para o Telegram: ${e.message}`);
     });
 
     req.write(dados);
     req.end();
 }
 
-// Função para executar ordem real na Bybit
-function executarOrdemReal(lado, precoAtual) {
+// --- FUNÇÃO DE EXECUÇÃO DE ORDEM REAL NA BYBIT (SPOT) ---
+function executarOrdemReal(lado, precoReferencia) {
     const timestamp = Date.now().toString();
     const endpoint = '/v5/order/create';
     
     const bodyObj = {
         category: "spot",
         symbol: PAR_ATIVO,
-        side: lado, 
+        side: lado, // "Buy" (Comprar na baixa) ou "Sell" (Vender na alta)
         orderType: "Market",
-        qty: "5.0" 
+        qty: "5.0" // Quantidade de XRP por ordem (ajustável conforme o seu saldo)
     };
     const bodyString = JSON.stringify(bodyObj);
     
+    // Assinatura de segurança HMAC exigida pela Bybit V5
     const signaturePayload = timestamp + BYBIT_API_KEY + '5000' + bodyString;
     const signature = crypto.createHmac('sha256', BYBIT_SECRET_KEY).update(signaturePayload).digest('hex');
 
@@ -87,17 +88,18 @@ function executarOrdemReal(lado, precoAtual) {
             try {
                 const resJson = JSON.parse(resposta);
                 if (resJson.retCode === 0) {
-                    console.log(`[SUCESSO] Ordem real de teste executada na Bybit:`, resJson.result);
+                    console.log(`[SUCESSO] Ordem real executada na Bybit:`, resJson.result);
                     
-                    const mensagem = `🚨 *TESTE DE ORDEM REAL EXECUTADA*\n\n` +
+                    // DISPARA O ALERTA PARA O TELEGRAM ESTRITAMENTE APÓS A EXECUÇÃO
+                    const mensagem = `🟢 *ORDEM REAL EXECUTADA*\n\n` +
                                      `• *Ação:* ${lado.toUpperCase()}\n` +
                                      `• *Par:* XRP/USDT\n` +
-                                     `• *Preço:* ${precoAtual}\n` +
+                                     `• *Preço:* ${precoReferencia}\n` +
                                      `• *Horário:* ${new Date().toLocaleTimeString()}`;
                     enviarMensagemTelegram(mensagem);
                 } else {
-                    console.error(`Erro retornado pela Bybit no teste:`, resJson.retMsg);
-                    enviarMensagemTelegram(`⚠️ *Erro na Ordem Real de Teste:* ${resJson.retMsg}`);
+                    console.error(`Erro retornado pela Bybit:`, resJson.retMsg);
+                    enviarMensagemTelegram(`⚠️ *Erro na Ordem Real Bybit:* ${resJson.retMsg}`);
                 }
             } catch (e) {
                 console.error("Erro ao interpretar resposta da Bybit:", e);
@@ -113,15 +115,34 @@ function executarOrdemReal(lado, precoAtual) {
     req.end();
 }
 
+// --- ROTA DE WEBHOOK / GESTÃO DE ENTRADAS ---
+app.post('/webhook', (req, res) => {
+    const dados = req.body;
+    console.log("Sinal recebido via webhook:", dados);
+
+    // Se receber comando para executar ou avaliar o sinal de compra/venda
+    const acao = dados.acao || 'Buy';
+    const preco = dados.preco || 'Mercado';
+
+    executarOrdemReal(acao, preco);
+
+    res.status(200).json({ status: "sucesso", mensagem: "Ordem processada pelo servidor!" });
+});
+
 app.get('/', (req, res) => {
-    res.send('MaxIncome Engine de Teste de Ordens Reais a operar!');
+    res.send('MaxIncome Engine de Ordens Reais a operar 24/7!');
+});
+
+// Proteções globais contra quedas do servidor
+process.on('uncaughtException', (err) => {
+    console.error('Erro não capturado:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Rejeição não tratada:', reason);
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor a rodar na porta ${PORT}`);
-    
-    // TESTE IMEDIATO AO ARRANCAR O SERVIDOR (Executa assim que o Render fizer deploy)
-    console.log("A disparar teste de ordem real imediata...");
-    executarOrdemReal("Buy", "Mercado (Teste)");
+    console.log(`Servidor de execução a rodar na porta ${PORT}`);
+    console.log("Sistema autónomo pronto e à escuta de ordens reais.");
 });
