@@ -1,168 +1,209 @@
 const express = require('express');
-const https = require('https');
-const crypto = require('crypto');
-
 const app = express();
 app.use(express.json());
 
-// --- SUAS CREDENCIAIS REAIS DIRETAS (COLE AQUI PARA FUNCIONAR JÁ) ---
-const BYBIT_API_KEY = 'SUA_API_KEY_AQUI';
-const BYBIT_SECRET_KEY = 'SUA_SECRET_KEY_AQUI';
+// --- AS SUAS CHAVES REAIS DA BYBIT ---
+const BYBIT_API_KEY = process.env.BYBIT_API_KEY || 'SUA_API_KEY_AQUI';
+const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || 'SUA_SECRET_KEY_AQUI';
 
-const TELEGRAM_BOT_TOKEN = '9179415153:AAGUvi8GmakFwjrxT_3BM2IoqqYkIssGTag';
-const TELEGRAM_CHAT_ID = '1633419568';
-const BYBIT_HOST = 'api.bybit.com';
+// Endpoint que fornece as chaves com segurança para o script do painel frontend
+app.get('/get-keys', (req, res) => {
+    res.json({
+        apiKey: BYBIT_API_KEY,
+        secretKey: BYBIT_SECRET_KEY
+    });
+});
 
-const ATIVOS = ['XRPUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+// --- ROTA DA SUA INTERFACE VISUAL ORIGINAL (A QUE O SENHOR ENVIOU) ---
+app.get('/', (req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <title>MaxIncome - Grid Trading Autónomo 24/7</title>
+    <style>
+        body { background-color: #131722; color: #d1d4dc; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
+        h1 { color: #f0b90b; }
+        .card { background: #1e222d; padding: 20px; margin: 15px auto; width: 65%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .status-box { color: #0ecb81; font-weight: bold; margin-bottom: 20px; font-size: 16px; }
+        .trade-log { background: #11141d; padding: 15px; border-radius: 5px; margin-top: 10px; font-family: monospace; color: #0ecb81; text-align: left; max-height: 240px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
+    </style>
+</head>
+<body>
 
-let dadosPainel = {
-    saldoUsdt: "A sincronizar...",
-    saldoXrp: "A sincronizar...",
-    cotacoes: {},
-    ultimoLog: "[Sistema] Ligação direta estabelecida com a Bybit."
-};
+    <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
+    <p>Sistema de Grid Trading Autónomo (Roda Gigante: Compra na Baixa e Venda na Alta)</p>
 
-function enviarMensagemTelegram(texto) {
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    const dados = JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: texto, parse_mode: 'Markdown' });
-    const urlObj = new URL(url);
-    const options = { hostname: urlObj.hostname, path: urlObj.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(dados) } };
-    const req = https.request(options, (res) => { res.on('data', () => {}); });
-    req.on('error', () => {});
-    req.write(dados);
-    req.end();
-}
+    <div class="card">
+        <label><strong>Ativo em Operação:</strong> XRP (XRP/USDT)</label>
+    </div>
 
-function consultarSaldoBybit() {
-    const timestamp = Date.now().toString();
-    const queryString = "accountType=SPOT";
-    const signaturePayload = timestamp + BYBIT_API_KEY + '5000' + queryString;
-    const signature = crypto.createHmac('sha256', BYBIT_SECRET_KEY).update(signaturePayload).digest('hex');
+    <div class="status-box">🟢 Robô em Ciclo Perpétuo Ativo</div>
 
-    const options = {
-        hostname: BYBIT_HOST,
-        path: `/v5/account/wallet-balance?${queryString}`,
-        method: 'GET',
-        headers: {
-            'X-BAPI-API-KEY': BYBIT_API_KEY,
-            'X-BAPI-TIMESTAMP': timestamp,
-            'X-BAPI-SIGN': signature,
-            'X-BAPI-RECV-WINDOW': '5000'
+    <div class="card">
+        <h3>Saldo Disponível (Bybit)</h3>
+        <h2 id="saldoInfo" style="color: #0ecb81;">A carregar saldos...</h2>
+    </div>
+
+    <div class="card">
+        <h3>Cotação de Mercado em Tempo Real (XRPUSDT)</h3>
+        <h2 id="currentPrice" style="color: #f0b90b;">$ --</h2>
+    </div>
+
+    <div class="card">
+        <h3>Registo de Atividade do Grid Trading</h3>
+        <div id="tradeLog" class="trade-log">A sincronizar com a corretora...</div>
+    </div>
+
+    <script>
+        let ultimoPrecoCompra = 1.3115;
+
+        async function asyncCryptoHMAC(secret, message) {
+            const enc = new TextEncoder();
+            const key = await crypto.subtle.importKey(
+                "raw", enc.encode(secret), { name: "HMAC", hash: { name: "SHA-256" } }, false, ["sign"]
+            );
+            const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+            return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
         }
-    };
 
-    const req = https.request(options, (res) => {
-        let resposta = '';
-        res.on('data', (chunk) => { resposta += chunk; });
-        res.on('end', () => {
+        async function obterChaves() {
+            const res = await fetch('/get-keys');
+            return await res.json();
+        }
+
+        async function atualizarPainel() {
             try {
-                const resJson = JSON.parse(resposta);
-                if (resJson.retCode === 0 && resJson.result && resJson.result.list) {
-                    const moedas = resJson.result.list[0].coin;
-                    moedas.forEach(m => {
-                        if (m.coin === 'USDT') dadosPainel.saldoUsdt = parseFloat(m.walletBalance).toFixed(2);
-                        if (m.coin === 'XRP') dadosPainel.saldoXrp = parseFloat(m.walletBalance).toFixed(2);
-                    });
-                } else {
-                    dadosPainel.ultimoLog = `[Erro Bybit Saldo]: ${resJson.retMsg}`;
+                const res = await fetch(\`https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT\`);
+                const data = await res.json();
+                if (data && data.price) {
+                    const precoAtual = parseFloat(data.price);
+                    document.getElementById('currentPrice').innerText = \`$ \${precoAtual.toFixed(4)}\`;
+                    executarCicloInteligente(precoAtual);
                 }
             } catch (e) {
-                console.error("Erro parse:", e);
+                console.error(e);
             }
-        });
-    });
-    req.on('error', () => {});
-    req.end();
-}
-
-function consultarMercado() {
-    ATIVOS.forEach(simbolo => {
-        const options = { hostname: BYBIT_HOST, path: `/v5/market/tickers?category=spot&symbol=${simbolo}`, method: 'GET' };
-        const req = https.request(options, (res) => {
-            let resposta = '';
-            res.on('data', (chunk) => { resposta += chunk; });
-            res.on('end', () => {
-                try {
-                    const resJson = JSON.parse(resposta);
-                    if (resJson.retCode === 0 && resJson.result && resJson.result.list) {
-                        dadosPainel.cotacoes[simbolo] = parseFloat(resJson.result.list[0].lastPrice).toFixed(4);
-                    }
-                } catch (e) {}
-            });
-        });
-        req.on('error', () => {});
-        req.end();
-    });
-}
-
-// Motor autónomo de rondas
-function iniciarMotorAutonomo() {
-    setInterval(() => {
-        const agora = new Date();
-        if (agora.getMinutes() % 5 === 0 && agora.getSeconds() <= 5) {
-            dadosPainel.ultimoLog = `[${agora.toLocaleTimeString()}] 🔍 Análise de Grid Trading ativa na nuvem para múltiplos ativos.`;
         }
-    }, 5000);
-}
 
-setInterval(() => {
-    consultarSaldoBybit();
-    consultarMercado();
-}, 10000);
+        async function executarCicloInteligente(precoAtual) {
+            const keys = await obterChaves();
+            if (!keys.apiKey || !keys.secretKey) return;
 
-app.get('/', (req, res) => {
-    let cotacoesHtml = '';
-    for (let [ativo, preco] of Object.entries(dadosPainel.cotacoes)) {
-        cotacoesHtml += `<span style="margin: 0 10px;"><b>${ativo}:</b> $${preco}</span><br>`;
-    }
+            const logBox = document.getElementById('tradeLog');
+            const time = new Date().toLocaleTimeString();
 
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="pt">
-        <head>
-            <meta charset="UTF-8">
-            <title>MaxIncome - Nuvem Autónoma 24/7</title>
-            <meta http-equiv="refresh" content="10">
-            <style>
-                body { background-color: #0d1117; color: #c9d1d9; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
-                h1 { color: #f0a500; }
-                .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin: 20px auto; padding: 20px; width: 80%; max-width: 800px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-                .status { color: #2ea043; font-weight: bold; }
-                .price { color: #f0a500; font-size: 20px; font-weight: bold; }
-                .log { background: #0d1117; border: 1px solid #30363d; padding: 15px; text-align: left; font-family: monospace; color: #3fb950; border-radius: 4px; height: 100px; overflow-y: auto; }
-            </style>
-        </head>
-        <body>
-            <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
-            <p>Sistema Multi-Ativo de Grid Trading (Compra na Baixa e Venda na Alta)</p>
+            const timeRes = await fetch('https://api.binance.com/api/v3/time');
+            const timeData = await timeRes.json();
+            const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
+            const recvWindow = '60000';
+
+            const queryString = "accountType=UNIFIED";
+            const signatureSaldo = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + queryString);
             
-            <div class="card">
-                <h3>Ativos em Monitorização Contínua</h3>
-                <p class="status">🟢 XRP, BTC, ETH, SOL Ativos na Nuvem</p>
-            </div>
+            const saldoRes = await fetch(\`https://api.bybit.com/v5/account/wallet-balance?\${queryString}\`, {
+                method: 'GET',
+                headers: {
+                    'X-BAPI-API-KEY': keys.apiKey,
+                    'X-BAPI-SIGN': signatureSaldo,
+                    'X-BAPI-TIMESTAMP': serverTimestamp,
+                    'X-BAPI-RECV-WINDOW': recvWindow
+                }
+            });
+            const saldoData = await saldoRes.json();
 
-            <div class="card">
-                <h3>Saldo Disponível na Bybit (Real)</h3>
-                <p class="price">${dadosPainel.saldoUsdt} USDT | ${dadosPainel.saldoXrp} XRP</p>
-            </div>
+            let usdtDisponivel = 0;
+            let xrpDisponivel = 0;
 
-            <div class="card">
-                <h3>Cotações de Mercado em Tempo Real</h3>
-                <div class="price">${cotacoesHtml || 'A ligar à Bybit...'}</div>
-            </div>
+            if (saldoData.retCode === 0 && saldoData.result.list[0]) {
+                const moedas = saldoData.result.list[0].coin;
+                for (let m of moedas) {
+                    if (m.coin === "USDT") usdtDisponivel = parseFloat(m.walletBalance || 0);
+                    if (m.coin === "XRP") xrpDisponivel = parseFloat(m.walletBalance || 0);
+                }
+            }
 
-            <div class="card">
-                <h3>Registo de Atividade do Grid Trading</h3>
-                <div class="log">${dadosPainel.ultimoLog}</div>
-            </div>
-        </body>
-        </html>
-    `);
+            document.getElementById('saldoInfo').innerText = \`\${usdtDisponivel.toFixed(2)} USDT | \${xrpDisponivel.toFixed(2)} XRP\`;
+
+            if (xrpDisponivel >= 1.5) {
+                const alvoLucro = ultimoPrecoCompra * 1.008;
+                logBox.innerText = \`[\${time}] 🔍 Tem \${xrpDisponivel.toFixed(2)} XRP. Alvo de Venda: $\${alvoLucro.toFixed(4)} (Atual: $\${precoAtual.toFixed(4)})\n\` + logBox.innerText;
+
+                if (precoAtual >= alvoLucro) {
+                    logBox.innerText = \`[\${time}] 📈 Alvo atingido! A vender XRP para obter USDT...\n\` + logBox.innerText;
+
+                    const bodyData = {
+                        category: "spot",
+                        symbol: "XRPUSDT",
+                        side: "Sell",
+                        orderType: "Market",
+                        qty: Math.floor(xrpDisponivel).toString()
+                    };
+
+                    const jsonBody = JSON.stringify(bodyData);
+                    const sigOrder = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + jsonBody);
+
+                    const resp = await fetch('https://api.bybit.com/v5/order/create', {
+                        method: 'POST',
+                        headers: {
+                            'X-BAPI-API-KEY': keys.apiKey,
+                            'X-BAPI-SIGN': sigOrder,
+                            'X-BAPI-TIMESTAMP': serverTimestamp,
+                            'X-BAPI-RECV-WINDOW': recvWindow,
+                            'Content-Type': 'application/json'
+                        },
+                        body: jsonBody
+                    });
+                    const resJson = await resp.json();
+                    if (resJson.retCode === 0) {
+                        logBox.innerText = \`[\${time}] 💰 VENDA REALIZADA COM SUCESSO! ID: \${resJson.result.orderId}\n\` + logBox.innerText;
+                    }
+                }
+            } else if (usdtDisponivel >= 1.0) {
+                logBox.innerText = \`[\${time}] 🔍 Tem \${usdtDisponivel.toFixed(2)} USDT. À espera de oportunidade de compra...\n\` + logBox.innerText;
+
+                const qtdComprar = "2";
+                const bodyData = {
+                    category: "spot",
+                    symbol: "XRPUSDT",
+                    side: "Buy",
+                    orderType: "Market",
+                    qty: qtdComprar
+                };
+
+                const jsonBody = JSON.stringify(bodyData);
+                const sigOrder = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + jsonBody);
+
+                const resp = await fetch('https://api.bybit.com/v5/order/create', {
+                    method: 'POST',
+                    headers: {
+                        'X-BAPI-API-KEY': keys.apiKey,
+                        'X-BAPI-SIGN': sigOrder,
+                        'X-BAPI-TIMESTAMP': serverTimestamp,
+                        'X-BAPI-RECV-WINDOW': recvWindow,
+                        'Content-Type': 'application/json'
+                    },
+                    body: jsonBody
+                });
+                const resJson = await resp.json();
+                if (resJson.retCode === 0) {
+                    ultimoPrecoCompra = precoAtual;
+                    logBox.innerText = \`[\${time}] ✅ COMPRA REALIZADA COM SUCESSO! ID: \${resJson.result.orderId}\n\` + logBox.innerText;
+                }
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            atualizarPainel();
+            setInterval(atualizarPainel, 20000);
+        });
+    </script>
+
+</body>
+</html>`);
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    consultarSaldoBybit();
-    consultarMercado();
-    iniciarMotorAutonomo();
+    console.log(`MaxIncome a operar na porta ${PORT}`);
 });
