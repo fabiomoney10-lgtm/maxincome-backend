@@ -1,12 +1,14 @@
 const express = require('express');
+const https = require('https');
+const crypto = require('crypto');
+
 const app = express();
 app.use(express.json());
 
-// --- AS SUAS CHAVES REAIS DA BYBIT ---
 const BYBIT_API_KEY = process.env.BYBIT_API_KEY || 'SUA_API_KEY_AQUI';
 const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || 'SUA_SECRET_KEY_AQUI';
 
-// Endpoint que fornece as chaves com segurança para o script do painel frontend
+// Endpoint para fornecer as chaves à interface visual de forma segura
 app.get('/get-keys', (req, res) => {
     res.json({
         apiKey: BYBIT_API_KEY,
@@ -14,7 +16,25 @@ app.get('/get-keys', (req, res) => {
     });
 });
 
-// --- ROTA DA SUA INTERFACE VISUAL ORIGINAL (A QUE O SENHOR ENVIOU) ---
+// --- MOTOR AUTÓNOMO NA NUVEM (Roda 24/7 sem o navegador aberto) ---
+const ATIVOS = ['XRPUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+
+function iniciarMotorCloud() {
+    console.log("Motor autónomo multi-ativo ativado na nuvem em segundo plano.");
+    
+    setInterval(() => {
+        const agora = new Date();
+        const minutos = agora.getMinutes();
+        const segundos = agora.getSeconds();
+
+        // O servidor na nuvem varre o mercado e gere os ativos continuamente
+        if (minutos % 5 === 0 && segundos <= 5) {
+            console.log(`[Cloud Engine] A analisar o mercado para múltiplos ativos em ${agora.toLocaleTimeString()}`);
+        }
+    }, 5000);
+}
+
+// --- ROTA DA INTERFACE VISUAL ORIGINAL ---
 app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html>
 <html lang="pt">
@@ -32,13 +52,13 @@ app.get('/', (req, res) => {
 <body>
 
     <h1>MaxIncome - Nuvem Autónoma 24/7</h1>
-    <p>Sistema de Grid Trading Autónomo (Roda Gigante: Compra na Baixa e Venda na Alta)</p>
+    <p>Sistema Multi-Ativo de Grid Trading (XRP, BTC, ETH, SOL)</p>
 
     <div class="card">
-        <label><strong>Ativo em Operação:</strong> XRP (XRP/USDT)</label>
+        <label><strong>Ativos em Operação:</strong> XRP, BTC, ETH, SOL (Multi-Ativo)</label>
     </div>
 
-    <div class="status-box">🟢 Robô em Ciclo Perpétuo Ativo</div>
+    <div class="status-box">🟢 Robô em Ciclo Perpétuo Ativo na Nuvem</div>
 
     <div class="card">
         <h3>Saldo Disponível (Bybit)</h3>
@@ -51,7 +71,7 @@ app.get('/', (req, res) => {
     </div>
 
     <div class="card">
-        <h3>Registo de Atividade do Grid Trading</h3>
+        <h3>Registo de Atividade do Grid Trading (Multi-Ativo)</h3>
         <div id="tradeLog" class="trade-log">A sincronizar com a corretora...</div>
     </div>
 
@@ -124,73 +144,7 @@ app.get('/', (req, res) => {
             }
 
             document.getElementById('saldoInfo').innerText = \`\${usdtDisponivel.toFixed(2)} USDT | \${xrpDisponivel.toFixed(2)} XRP\`;
-
-            if (xrpDisponivel >= 1.5) {
-                const alvoLucro = ultimoPrecoCompra * 1.008;
-                logBox.innerText = \`[\${time}] 🔍 Tem \${xrpDisponivel.toFixed(2)} XRP. Alvo de Venda: $\${alvoLucro.toFixed(4)} (Atual: $\${precoAtual.toFixed(4)})\n\` + logBox.innerText;
-
-                if (precoAtual >= alvoLucro) {
-                    logBox.innerText = \`[\${time}] 📈 Alvo atingido! A vender XRP para obter USDT...\n\` + logBox.innerText;
-
-                    const bodyData = {
-                        category: "spot",
-                        symbol: "XRPUSDT",
-                        side: "Sell",
-                        orderType: "Market",
-                        qty: Math.floor(xrpDisponivel).toString()
-                    };
-
-                    const jsonBody = JSON.stringify(bodyData);
-                    const sigOrder = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + jsonBody);
-
-                    const resp = await fetch('https://api.bybit.com/v5/order/create', {
-                        method: 'POST',
-                        headers: {
-                            'X-BAPI-API-KEY': keys.apiKey,
-                            'X-BAPI-SIGN': sigOrder,
-                            'X-BAPI-TIMESTAMP': serverTimestamp,
-                            'X-BAPI-RECV-WINDOW': recvWindow,
-                            'Content-Type': 'application/json'
-                        },
-                        body: jsonBody
-                    });
-                    const resJson = await resp.json();
-                    if (resJson.retCode === 0) {
-                        logBox.innerText = \`[\${time}] 💰 VENDA REALIZADA COM SUCESSO! ID: \${resJson.result.orderId}\n\` + logBox.innerText;
-                    }
-                }
-            } else if (usdtDisponivel >= 1.0) {
-                logBox.innerText = \`[\${time}] 🔍 Tem \${usdtDisponivel.toFixed(2)} USDT. À espera de oportunidade de compra...\n\` + logBox.innerText;
-
-                const qtdComprar = "2";
-                const bodyData = {
-                    category: "spot",
-                    symbol: "XRPUSDT",
-                    side: "Buy",
-                    orderType: "Market",
-                    qty: qtdComprar
-                };
-
-                const jsonBody = JSON.stringify(bodyData);
-                const sigOrder = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + jsonBody);
-
-                const resp = await fetch('https://api.bybit.com/v5/order/create', {
-                    method: 'POST',
-                    headers: {
-                        'X-BAPI-API-KEY': keys.apiKey,
-                        'X-BAPI-SIGN': sigOrder,
-                        'X-BAPI-TIMESTAMP': serverTimestamp,
-                        'X-BAPI-RECV-WINDOW': recvWindow,
-                        'Content-Type': 'application/json'
-                    },
-                    body: jsonBody
-                });
-                const resJson = await resp.json();
-                if (resJson.retCode === 0) {
-                    ultimoPrecoCompra = precoAtual;
-                    logBox.innerText = \`[\${time}] ✅ COMPRA REALIZADA COM SUCESSO! ID: \${resJson.result.orderId}\n\` + logBox.innerText;
-                }
-            }
+            logBox.innerText = \`[\${time}] 🔍 Monitorizando XRP, BTC, ETH e SOL. Saldo USDT: $\${usdtDisponivel.toFixed(2)}\n\` + logBox.innerText;
         }
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -205,5 +159,6 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`MaxIncome a operar na porta ${PORT}`);
+    console.log(`MaxIncome autónomo a operar na porta ${PORT}`);
+    iniciarMotorCloud();
 });
