@@ -13,6 +13,7 @@ const ATIVOS = ['XRPUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 let ativoAtualIndex = 0;
 let dadosLog = "Servidor autónomo multi-ativo a operar na nuvem 24/7.";
 let cotacoesAtivas = {};
+let ultimoSaldoFormatado = "A ligar à corretora...";
 
 function asyncCryptoHMAC(secret, message) {
     return crypto.createHmac('sha256', secret).update(message).digest('hex');
@@ -29,6 +30,7 @@ async function executarMotorCloud() {
         const simbolo = ATIVOS[ativoAtualIndex];
         ativoAtualIndex = (ativoAtualIndex + 1) % ATIVOS.length;
 
+        // 1. Obter cotação
         const priceRes = await new Promise((resolve) => {
             https.get(`https://${BYBIT_HOST}/v5/market/tickers?category=spot&symbol=${simbolo}`, (res) => {
                 let data = '';
@@ -38,10 +40,11 @@ async function executarMotorCloud() {
         });
 
         const priceJson = JSON.parse(priceRes);
-        if (!priceJson.result || !priceJson.result.list[0]) return;
-        const precoAtual = parseFloat(priceJson.result.list[0].lastPrice);
-        cotacoesAtivas[simbolo] = precoAtual;
+        if (priceJson.result && priceJson.result.list[0]) {
+            cotacoesAtivas[simbolo] = parseFloat(priceJson.result.list[0].lastPrice);
+        }
 
+        // 2. Obter saldos diretamente no servidor
         const timestamp = Date.now().toString();
         const recvWindow = '60000';
         const queryString = "accountType=UNIFIED";
@@ -67,34 +70,40 @@ async function executarMotorCloud() {
         });
 
         const saldoData = JSON.parse(saldoRes);
-        let usdtDisponivel = 0;
+        let usdt = 0, xrp = 0, btc = 0, eth = 0, sol = 0;
 
         if (saldoData.retCode === 0 && saldoData.result.list[0]) {
             const moedas = saldoData.result.list[0].coin;
             for (let m of moedas) {
-                if (m.coin === "USDT") usdtDisponivel = parseFloat(m.walletBalance || 0);
+                if (m.coin === "USDT") usdt = parseFloat(m.walletBalance || 0);
+                if (m.coin === "XRP") xrp = parseFloat(m.walletBalance || 0);
+                if (m.coin === "BTC") btc = parseFloat(m.walletBalance || 0);
+                if (m.coin === "ETH") eth = parseFloat(m.walletBalance || 0);
+                if (m.coin === "SOL") sol = parseFloat(m.walletBalance || 0);
             }
+            ultimoSaldoFormatado = `${usdt.toFixed(2)} USDT | XRP: ${xrp.toFixed(2)} | BTC: ${btc.toFixed(4)} | ETH: ${eth.toFixed(4)} | SOL: ${sol.toFixed(2)}`;
         }
 
         const time = new Date().toLocaleTimeString();
-        dadosLog = `[${time}] 🔍 A analisar: ${simbolo} | Preço: $${precoAtual} | USDT: $${usdtDisponivel.toFixed(2)}`;
+        dadosLog = `[${time}] 🔍 A analisar: ${simbolo} | USDT Disponível: $${usdt.toFixed(2)}`;
 
     } catch (e) {
-        console.error("Erro no motor multi-ativo:", e);
+        console.error("Erro no motor cloud:", e);
     }
 }
 
-setInterval(executarMotorCloud, 15000);
+setInterval(executarMotorCloud, 10000);
+executarMotorCloud(); // Executa logo ao iniciar
 
-app.get('/status-log', (req, res) => {
-    res.json({ log: dadosLog, cotacoes: cotacoesAtivas });
+app.get('/status-cloud', (req, res) => {
+    res.json({
+        log: dadosLog,
+        cotacoes: cotacoesAtivas,
+        saldo: ultimoSaldoFormatado
+    });
 });
 
-app.get('/get-keys', (req, res) => {
-    res.json({ apiKey: BYBIT_API_KEY, secretKey: BYBIT_SECRET_KEY });
-});
-
-// --- PAINEL VISUAL CORRIGIDO ---
+// --- PAINEL VISUAL LIMPO ---
 app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html>
 <html lang="pt">
@@ -124,12 +133,12 @@ app.get('/', (req, res) => {
 
     <div class="card">
         <h3>Saldo Disponível (Bybit)</h3>
-        <h2 id="saldoInfo" style="color: #0ecb81;">A carregar saldos...</h2>
+        <h2 id="saldoInfo" style="color: #0ecb81;">A sincronizar com o servidor...</h2>
     </div>
 
     <div class="card">
         <h3>Cotações de Mercado em Tempo Real</h3>
-        <div class="prices-grid" id="pricesGrid">
+        <div class="prices-grid">
             <div class="price-item"><b>XRP:</b> <span id="p-XRPUSDT">$ --</span></div>
             <div class="price-item"><b>BTC:</b> <span id="p-BTCUSDT">$ --</span></div>
             <div class="price-item"><b>ETH:</b> <span id="p-ETHUSDT">$ --</span></div>
@@ -143,69 +152,22 @@ app.get('/', (req, res) => {
     </div>
 
     <script>
-        async function asyncCryptoHMAC(secret, message) {
-            const enc = new TextEncoder();
-            const key = await crypto.subtle.importKey(
-                "raw", enc.encode(secret), { name: "HMAC", hash: { name: "SHA-256" } }, false, ["sign"]
-            );
-            const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
-            return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
-        }
-
-        async function obterChaves() {
-            const res = await fetch('/get-keys');
-            return await res.json();
-        }
-
         async function atualizarPainel() {
             try {
-                ['XRPUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT'].forEach(async (simbolo) => {
-                    const res = await fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=' + simbolo);
-                    const data = await res.json();
-                    if (data.retCode === 0 && data.result.list[0]) {
-                        const preco = parseFloat(data.result.list[0].lastPrice).toFixed(2);
-                        const el = document.getElementById('p-' + simbolo);
-                        if (el) el.innerText = '$ ' + preco;
-                    }
-                });
-
-                const keys = await obterChaves();
-                if (keys.apiKey && keys.secretKey) {
-                    const timeRes = await fetch('https://api.binance.com/api/v3/time');
-                    const timeData = await timeRes.json();
-                    const serverTimestamp = timeData.serverTime ? timeData.serverTime.toString() : Date.now().toString();
-                    const recvWindow = '60000';
-                    const queryString = "accountType=UNIFIED";
-                    const signatureSaldo = await asyncCryptoHMAC(keys.secretKey, serverTimestamp + keys.apiKey + recvWindow + queryString);
-                    
-                    const saldoRes = await fetch('https://api.bybit.com/v5/account/wallet-balance?' + queryString, {
-                        method: 'GET',
-                        headers: {
-                            'X-BAPI-API-KEY': keys.apiKey,
-                            'X-BAPI-SIGN': signatureSaldo,
-                            'X-BAPI-TIMESTAMP': serverTimestamp,
-                            'X-BAPI-RECV-WINDOW': recvWindow
-                        }
-                    });
-                    const saldoData = await saldoRes.json();
-                    let usdt = 0, xrp = 0, btc = 0, eth = 0, sol = 0;
-                    if (saldoData.retCode === 0 && saldoData.result.list[0]) {
-                        for (let m of saldoData.result.list[0].coin) {
-                            if (m.coin === "USDT") usdt = parseFloat(m.walletBalance || 0);
-                            if (m.coin === "XRP") xrp = parseFloat(m.walletBalance || 0);
-                            if (m.coin === "BTC") btc = parseFloat(m.walletBalance || 0);
-                            if (m.coin === "ETH") eth = parseFloat(m.walletBalance || 0);
-                            if (m.coin === "SOL") sol = parseFloat(m.walletBalance || 0);
-                        }
-                        // CORRIGIDO AQUI O ERRO DO ELEMENTO ID
-                        document.getElementById('saldoInfo').innerText = usdt.toFixed(2) + ' USDT | XRP: ' + xrp.toFixed(2) + ' | BTC: ' + btc.toFixed(4) + ' | ETH: ' + eth.toFixed(4) + ' | SOL: ' + sol.toFixed(2);
-                    }
+                const res = await fetch('/status-cloud');
+                const data = await res.json();
+                
+                if (data.saldo) {
+                    document.getElementById('saldoInfo').innerText = data.saldo;
                 }
-
-                const logRes = await fetch('/status-log');
-                const logData = await logRes.json();
-                if (logData.log) {
-                    document.getElementById('tradeLog').innerText = logData.log + '\\n' + document.getElementById('tradeLog').innerText;
+                if (data.log) {
+                    document.getElementById('tradeLog').innerText = data.log + '\\n' + document.getElementById('tradeLog').innerText;
+                }
+                if (data.cotacoes) {
+                    if (data.cotacoes.XRPUSDT) document.getElementById('p-XRPUSDT').innerText = '$ ' + data.cotacoes.XRPUSDT.toFixed(2);
+                    if (data.cotacoes.BTCUSDT) document.getElementById('p-BTCUSDT').innerText = '$ ' + data.cotacoes.BTCUSDT.toFixed(2);
+                    if (data.cotacoes.ETHUSDT) document.getElementById('p-ETHUSDT').innerText = '$ ' + data.cotacoes.ETHUSDT.toFixed(2);
+                    if (data.cotacoes.SOLUSDT) document.getElementById('p-SOLUSDT').innerText = '$ ' + data.cotacoes.SOLUSDT.toFixed(2);
                 }
             } catch (e) {
                 console.error(e);
@@ -214,7 +176,7 @@ app.get('/', (req, res) => {
 
         window.addEventListener('DOMContentLoaded', () => {
             atualizarPainel();
-            setInterval(atualizarPainel, 15000);
+            setInterval(atualizarPainel, 5000);
         });
     </script>
 </body>
@@ -223,5 +185,5 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`MaxIncome multi-ativo cloud engine a operar na porta ${PORT}`);
+    console.log(`MaxIncome cloud engine a operar na porta ${PORT}`);
 });
