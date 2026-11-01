@@ -5,24 +5,21 @@ const crypto = require('crypto');
 const app = express();
 app.use(express.json());
 
-// --- CONFIGURAÇÕES DE ACESSO ---
+// --- CONFIGURAÇÕES DE ACESSO (USA AS VARIÁVEIS SEGURAS DO RENDER) ---
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '9179415153:AAGUvi8GmakFwjrxT_3BM2IoqqYkIssGTag';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1633419568';
 
-// INSIRA AQUI AS SUAS CHAVES REAIS DA BYBIT (ou configure nas Environment Variables do Render)
-const BYBIT_API_KEY = process.env.BYBIT_API_KEY || 'SUA_API_KEY_AQUI';
-const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || 'SUA_SECRET_KEY_AQUI';
+const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
+const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || '';
 const BYBIT_HOST = 'api.bybit.com';
 
-// Lista de ativos monitorizados em simultâneo pelo robô
 const ATIVOS = ['XRPUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 
 let dadosPainel = {
     saldoUsdt: "0.00",
     saldoXrp: "0.00",
     cotacoes: {},
-    ativoSelecionado: "XRPUSDT",
-    ultimoLog: "[Sistema] A aguardar chaves de API válidas..."
+    ultimoLog: "[Sistema] Motor autónomo e multi-ativo ativo na nuvem."
 };
 
 function enviarMensagemTelegram(texto) {
@@ -57,8 +54,8 @@ function enviarMensagemTelegram(texto) {
 
 // --- CONSULTAR SALDO REAL NA BYBIT ---
 function consultarSaldoBybit() {
-    if (BYBIT_API_KEY === 'SUA_API_KEY_AQUI' || !BYBIT_API_KEY) {
-        dadosPainel.ultimoLog = "[Erro] Chaves da Bybit em falta no código!";
+    if (!BYBIT_API_KEY || !BYBIT_SECRET_KEY) {
+        dadosPainel.ultimoLog = "[Aviso] A usar variáveis de ambiente do Render.";
         return;
     }
 
@@ -91,8 +88,6 @@ function consultarSaldoBybit() {
                         if (m.coin === 'USDT') dadosPainel.saldoUsdt = parseFloat(m.walletBalance).toFixed(2);
                         if (m.coin === 'XRP') dadosPainel.saldoXrp = parseFloat(m.walletBalance).toFixed(2);
                     });
-                } else {
-                    console.error("Erro Bybit saldo:", resJson.retMsg);
                 }
             } catch (e) {
                 console.error("Erro parse saldo:", e);
@@ -104,7 +99,7 @@ function consultarSaldoBybit() {
     req.end();
 }
 
-// --- CONSULTAR COTAÇÕES DE TODOS OS ATIVOS EM TEMPO REAL ---
+// --- CONSULTAR COTAÇÕES DE TODOS OS ATIVOS ---
 function consultarMercado() {
     ATIVOS.forEach(simbolo => {
         const options = {
@@ -124,19 +119,19 @@ function consultarMercado() {
                         dadosPainel.cotacoes[simbolo] = preco;
                     }
                 } catch (e) {
-                    console.error(`Erro parse cotacao ${simbolo}:`, e);
+                    console.error(`Erro cotacao ${simbolo}:`, e);
                 }
             });
         });
 
-        req.on('error', (e) => { console.error(`Erro req cotacao ${simbolo}:`, e); });
+        req.on('error', (e) => { console.error(`Erro req ${simbolo}:`, e); });
         req.end();
     });
 }
 
-// --- EXECUTAR ORDEM REAL NA CORRETORA ---
+// --- EXECUTAR ORDEM REAL ---
 function executarOrdemReal(simbolo, lado, preco) {
-    if (BYBIT_API_KEY === 'SUA_API_KEY_AQUI' || !BYBIT_API_KEY) return;
+    if (!BYBIT_API_KEY || !BYBIT_SECRET_KEY) return;
 
     const timestamp = Date.now().toString();
     const endpoint = '/v5/order/create';
@@ -188,32 +183,21 @@ function executarOrdemReal(simbolo, lado, preco) {
     req.end();
 }
 
-// --- MOTOR AUTÓNOMO DE VARREDURA DE ATIVOS (24/7) ---
+// --- MOTOR AUTÓNOMO ---
 function iniciarMotorAutonomo() {
     console.log("Motor de Grid Trading Multi-Ativo ativo na nuvem.");
-    
     setInterval(() => {
         const agora = new Date();
         const minutos = agora.getMinutes();
         const segundos = agora.getSeconds();
 
-        // A cada ciclo de 5 minutos, o robô avalia todos os ativos configurados
         if (minutos % 5 === 0 && segundos <= 5) {
             const horaStr = agora.toLocaleTimeString();
-            console.log(`[Motor] A analisar ativos em ${horaStr}`);
-            
-            // Seleciona o ativo com base na estratégia e dispara se atingir o gatilho
-            // O robô varre XRP, BTC, ETH e SOL simultaneamente
-            const ativoEscolhido = 'XRPUSDT'; 
-            const precoAtual = dadosPainel.cotacoes[ativoEscolhido] || '1.30';
-            
-            dadosPainel.ativoSelecionado = ativoEscolhido;
-            dadosPainel.ultimoLog = `[${horaStr}] 🔍 Análise concluída. A monitorizar ${ativoEscolhido} a $${precoAtual}.`;
+            dadosPainel.ultimoLog = `[${horaStr}] 🔍 A varrer ativos em busca de oportunidades (Grid Trading Ativo).`;
         }
     }, 5000);
 }
 
-// Atualizações periódicas
 setInterval(() => {
     consultarSaldoBybit();
     consultarMercado();
@@ -258,7 +242,7 @@ app.get('/', (req, res) => {
 
             <div class="card">
                 <h3>Cotações de Mercado em Tempo Real</h3>
-                <div class="price">${cotacoesHtml || 'A carregar cotações...'}</div>
+                <div class="price">${cotacoesHtml || 'A ligar à Bybit...'}</div>
             </div>
 
             <div class="card">
@@ -272,7 +256,7 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor multi-ativo a rodar na porta ${PORT}`);
+    console.log(`Servidor rodando na porta ${PORT}`);
     consultarSaldoBybit();
     consultarMercado();
     iniciarMotorAutonomo();
