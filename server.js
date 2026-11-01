@@ -5,24 +5,24 @@ const crypto = require('crypto');
 const app = express();
 app.use(express.json());
 
-const BYBIT_API_KEY = process.env.BYBIT_API_KEY || 'SUA_API_KEY_AQUI';
-const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || 'SUA_SECRET_KEY_AQUI';
+const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
+const BYBIT_SECRET_KEY = process.env.BYBIT_SECRET_KEY || '';
 const BYBIT_HOST = 'api.bybit.com';
 
 const ATIVOS = ['XRPUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 let ativoAtualIndex = 0;
-let dadosLog = "Servidor autónomo multi-ativo a operar na nuvem 24/7.";
-let cotacoesAtivas = {};
+let dadosLog = "Servidor autónomo a iniciar ligação à Bybit...";
+let cotacoesAtivas = { XRPUSDT: 0, BTCUSDT: 0, ETHUSDT: 0, SOLUSDT: 0 };
 let ultimoSaldoFormatado = "A ligar à corretora...";
 
 function asyncCryptoHMAC(secret, message) {
     return crypto.createHmac('sha256', secret).update(message).digest('hex');
 }
 
-// --- MOTOR AUTÓNOMO MULTI-ATIVO NA NUVEM ---
 async function executarMotorCloud() {
-    if (!BYBIT_API_KEY || BYBIT_API_KEY === 'SUA_API_KEY_AQUI') {
-        dadosLog = "[Erro] Chaves da Bybit em falta no servidor.";
+    if (!BYBIT_API_KEY || !BYBIT_SECRET_KEY) {
+        dadosLog = "[Erro Crítico] Chaves da Bybit em falta nas Variáveis de Ambiente do Render!";
+        ultimoSaldoFormatado = "Erro: Chaves em falta no Render";
         return;
     }
 
@@ -30,21 +30,22 @@ async function executarMotorCloud() {
         const simbolo = ATIVOS[ativoAtualIndex];
         ativoAtualIndex = (ativoAtualIndex + 1) % ATIVOS.length;
 
-        // 1. Obter cotação
-        const priceRes = await new Promise((resolve) => {
-            https.get(`https://${BYBIT_HOST}/v5/market/tickers?category=spot&symbol=${simbolo}`, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => resolve(data));
-            }).on('error', () => resolve(null));
-        });
-
-        const priceJson = JSON.parse(priceRes);
-        if (priceJson.result && priceJson.result.list[0]) {
-            cotacoesAtivas[simbolo] = parseFloat(priceJson.result.list[0].lastPrice);
+        // 1. Buscar cotações de todos os ativos para o painel não ficar a zeros
+        for (let ativo of ATIVOS) {
+            const priceRes = await new Promise((resolve) => {
+                https.get(`https://${BYBIT_HOST}/v5/market/tickers?category=spot&symbol=${ativo}`, (res) => {
+                    let data = '';
+                    res.on('data', chunk => data += chunk);
+                    res.on('end', () => resolve(data));
+                }).on('error', () => resolve(null));
+            });
+            const priceJson = JSON.parse(priceRes);
+            if (priceJson.result && priceJson.result.list[0]) {
+                cotacoesAtivas[ativo] = parseFloat(priceJson.result.list[0].lastPrice);
+            }
         }
 
-        // 2. Obter saldos diretamente no servidor
+        // 2. Buscar saldos na Bybit
         const timestamp = Date.now().toString();
         const recvWindow = '60000';
         const queryString = "accountType=UNIFIED";
@@ -82,18 +83,21 @@ async function executarMotorCloud() {
                 if (m.coin === "SOL") sol = parseFloat(m.walletBalance || 0);
             }
             ultimoSaldoFormatado = `${usdt.toFixed(2)} USDT | XRP: ${xrp.toFixed(2)} | BTC: ${btc.toFixed(4)} | ETH: ${eth.toFixed(4)} | SOL: ${sol.toFixed(2)}`;
+            const time = new Date().toLocaleTimeString();
+            dadosLog = `[${time}] 🔍 Sincronizado com sucesso! A monitorizar ativos. USDT: $${usdt.toFixed(2)}`;
+        } else {
+            ultimoSaldoFormatado = `Erro na API Bybit: ${saldoData.retMsg || 'Falha de autenticação'}`;
+            dadosLog = `[Erro Bybit] ${saldoData.retMsg || 'Verifique as chaves API'}`;
         }
-
-        const time = new Date().toLocaleTimeString();
-        dadosLog = `[${time}] 🔍 A analisar: ${simbolo} | USDT Disponível: $${usdt.toFixed(2)}`;
 
     } catch (e) {
         console.error("Erro no motor cloud:", e);
     }
 }
 
+// Executa imediatamente ao iniciar e depois a cada 10 segundos
+executarMotorCloud();
 setInterval(executarMotorCloud, 10000);
-executarMotorCloud(); // Executa logo ao iniciar
 
 app.get('/status-cloud', (req, res) => {
     res.json({
@@ -103,7 +107,6 @@ app.get('/status-cloud', (req, res) => {
     });
 });
 
-// --- PAINEL VISUAL LIMPO ---
 app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html>
 <html lang="pt">
@@ -133,7 +136,7 @@ app.get('/', (req, res) => {
 
     <div class="card">
         <h3>Saldo Disponível (Bybit)</h3>
-        <h2 id="saldoInfo" style="color: #0ecb81;">A sincronizar com o servidor...</h2>
+        <h2 id="saldoInfo" style="color: #0ecb81;">A ligar à corretora...</h2>
     </div>
 
     <div class="card">
@@ -176,7 +179,7 @@ app.get('/', (req, res) => {
 
         window.addEventListener('DOMContentLoaded', () => {
             atualizarPainel();
-            setInterval(atualizarPainel, 5000);
+            setInterval(atualizarPainel, 4000);
         });
     </script>
 </body>
